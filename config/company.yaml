@@ -1,0 +1,26 @@
+ticker: V
+company_name: Visa Inc.
+cik: "0001403161"
+
+historical_years: 5
+forecast_years: 5
+
+peers:
+  - MA
+  - AXP
+  - PYPL
+  - FIS
+  - GPN
+
+assumptions:
+  revenue_growth: [0.10, 0.10, 0.09, 0.08, 0.07]
+  operating_margin: 0.67
+  tax_rate: 0.19
+  capex_pct_revenue: 0.025
+  da_pct_revenue: 0.020
+  nwc_pct_revenue: 0.00
+  risk_free_rate: 0.043
+  equity_risk_premium: 0.043
+  beta: 0.95
+  pre_tax_cost_of_debt: 0.035
+  terminal_growth: 0.025
