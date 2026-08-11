@@ -13,14 +13,84 @@ peers:
   - GPN
 
 assumptions:
-  revenue_growth: [0.10, 0.10, 0.09, 0.08, 0.07]
-  operating_margin: 0.67
-  tax_rate: 0.19
-  capex_pct_revenue: 0.025
-  da_pct_revenue: 0.020
-  nwc_pct_revenue: 0.00
-  risk_free_rate: 0.043
-  equity_risk_premium: 0.043
-  beta: 0.95
-  pre_tax_cost_of_debt: 0.035
+
+  forecast_years: 5
+
+  scenarios:
+
+    bear:
+      revenue_growth:
+        - 0.080
+        - 0.075
+        - 0.070
+        - 0.065
+        - 0.060
+
+      operating_margin:
+        - 0.600
+        - 0.605
+        - 0.610
+        - 0.615
+        - 0.620
+
+      tax_rate: 0.175
+
+      da_pct_revenue: 0.030
+      capex_pct_revenue: 0.038
+
+      delta_nwc_pct_incremental_revenue: 0.020
+
+
+    base:
+      revenue_growth:
+        - 0.105
+        - 0.100
+        - 0.095
+        - 0.090
+        - 0.085
+
+      operating_margin:
+        - 0.620
+        - 0.630
+        - 0.640
+        - 0.645
+        - 0.650
+
+      tax_rate: 0.170
+
+      da_pct_revenue: 0.030
+      capex_pct_revenue: 0.035
+
+      delta_nwc_pct_incremental_revenue: 0.010
+
+
+    bull:
+      revenue_growth:
+        - 0.125
+        - 0.115
+        - 0.105
+        - 0.100
+        - 0.095
+
+      operating_margin:
+        - 0.630
+        - 0.640
+        - 0.650
+        - 0.655
+        - 0.660
+
+      tax_rate: 0.165
+
+      da_pct_revenue: 0.030
+      capex_pct_revenue: 0.033
+
+      delta_nwc_pct_incremental_revenue: 0.005
+
+
+  wacc:
+    risk_free_rate: 0.043
+    equity_risk_premium: 0.043
+    beta: 0.95
+    pre_tax_cost_of_debt: 0.035
+
   terminal_growth: 0.025
