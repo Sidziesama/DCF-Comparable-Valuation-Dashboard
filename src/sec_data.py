@@ -106,8 +106,10 @@ ALIASES = {
     ],
 
     "depreciation": [
+        "DepreciationAndAmortization",
         "DepreciationDepletionAndAmortization",
         "DepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
+        "DepreciationAmortizationAndAccretionNet",
     ],
 
     "cfo": [
@@ -178,6 +180,37 @@ def find_xbrl_tag(facts: dict, aliases: list):
 
     return None, None
 
+def find_custom_xbrl_tag(
+    facts: dict,
+    keywords: list,
+):
+    """
+    Search all available XBRL namespaces for a concept
+    whose label/name contains the requested keywords.
+
+    Useful when a company uses a custom taxonomy concept.
+    """
+
+    all_facts = facts.get(
+        "facts",
+        {}
+    )
+
+    for namespace, concepts in all_facts.items():
+
+        for tag, obj in concepts.items():
+
+            searchable = (
+                tag.lower()
+            )
+
+            if all(
+                keyword.lower() in searchable
+                for keyword in keywords
+            ):
+                return tag, obj
+
+    return None, None
 
 def extract_observations(
     tag_object: dict,

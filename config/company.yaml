@@ -6,11 +6,17 @@ historical_years: 5
 forecast_years: 5
 
 peers:
-  - MA
-  - AXP
-  - PYPL
-  - FIS
-  - GPN
+
+  core_network:
+    - MA
+
+  payments_tech:
+    - PYPL
+    - FISV
+    - GPN
+
+  financial:
+    - AXP
 
 assumptions:
 

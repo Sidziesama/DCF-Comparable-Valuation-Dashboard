@@ -13,6 +13,7 @@ FLOW_METRICS = [
     "pretax_income",
     "tax_expense",
     "net_income",
+    "depreciation",
     "cfo",
     "capex",
 ]
@@ -165,6 +166,17 @@ def calculate_ratios(model):
         df["cfo"]
         - df["capex"]
     )
+    if "depreciation" in df.columns:
+
+        df["ebitda"] = (
+            df["operating_income"]
+            + df["depreciation"]
+        )
+
+        df["da_pct_revenue"] = (
+            df["depreciation"]
+            / df["revenue"]
+        )
 
     df["fcf_margin"] = (
         df["fcf"]
@@ -252,6 +264,9 @@ if __name__ == "__main__":
         "capex",
         "fcf",
         "fcf_margin",
+        "depreciation",
+        "ebitda",
+        "da_pct_revenue",
     ]
 
     print(
