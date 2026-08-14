@@ -5,6 +5,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+try:  # Support both ``python src/pipeline.py`` and package-style test imports.
+    from forecast_model import build_forecast_from_inputs
+except ModuleNotFoundError:  # pragma: no cover - exercised by package imports
+    from .forecast_model import build_forecast_from_inputs
+
 
 def _validate_common(forecast: pd.DataFrame, wacc: float, shares: float) -> None:
     if forecast.empty or "fcff" not in forecast:
@@ -144,3 +149,143 @@ def value_scenarios(forecasts, wacc, terminal_growth, cash, debt, shares_outstan
             }
         )
     return pd.DataFrame(rows).set_index("scenario")
+
+
+def _solve_bounded(objective, lower, upper, *, tolerance=1e-6, max_iterations=200):
+    """Solve a monotonic scalar objective with explicit bracketing diagnostics."""
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
+        raise ValueError("Solver bounds must be finite and lower must be below upper.")
+    low_value, high_value = float(objective(lower)), float(objective(upper))
+    if not np.isfinite(low_value) or not np.isfinite(high_value):
+        raise ValueError("Reverse DCF objective is non-finite at a solver bound.")
+    if abs(low_value) <= tolerance:
+        return lower, 0, low_value
+    if abs(high_value) <= tolerance:
+        return upper, 0, high_value
+    if low_value * high_value > 0:
+        raise ValueError(
+            "Target share price is outside the values produced by the configured "
+            f"bounds (endpoint residuals {low_value:,.4f} and {high_value:,.4f})."
+        )
+    for iteration in range(1, max_iterations + 1):
+        midpoint = (lower + upper) / 2
+        mid_value = float(objective(midpoint))
+        if not np.isfinite(mid_value):
+            raise ValueError("Reverse DCF objective became non-finite during iteration.")
+        if abs(mid_value) <= tolerance:
+            return midpoint, iteration, mid_value
+        if low_value * mid_value <= 0:
+            upper, high_value = midpoint, mid_value
+        else:
+            lower, low_value = midpoint, mid_value
+    raise RuntimeError(f"Reverse DCF did not converge after {max_iterations} iterations.")
+
+
+def _forecast_driver(forecast: pd.DataFrame, column: str, fallback: float) -> list[float]:
+    if column not in forecast:
+        return [fallback] * len(forecast)
+    values = pd.to_numeric(forecast[column], errors="coerce")
+    if values.isna().any():
+        raise ValueError(f"Forecast column {column!r} contains non-numeric values.")
+    return values.astype(float).tolist()
+
+
+def solve_reverse_dcf(
+    base_revenue, reference_forecast, target_share_price, wacc, terminal_growth,
+    cash, debt, shares_outstanding, *, mode="revenue_growth", bounds=None,
+    operating_margin=None, tolerance=1e-6, max_iterations=200,
+):
+    """Solve for a market-implied revenue growth, margin, or terminal growth."""
+    if target_share_price <= 0:
+        raise ValueError("target_share_price must be positive.")
+    if base_revenue <= 0:
+        raise ValueError("base_revenue must be positive.")
+    if reference_forecast.empty:
+        raise ValueError("reference_forecast cannot be empty.")
+    allowed = {"revenue_growth", "operating_margin", "terminal_growth"}
+    if mode not in allowed:
+        raise ValueError(f"Unsupported reverse DCF mode {mode!r}; expected {sorted(allowed)}.")
+    default_bounds = {
+        "revenue_growth": (-0.20, 0.35),
+        "operating_margin": (0.05, 0.85),
+        "terminal_growth": (-0.02, min(0.06, wacc - 0.0025)),
+    }
+    lower, upper = bounds or default_bounds[mode]
+    if mode == "terminal_growth" and upper >= wacc:
+        raise ValueError("The terminal-growth upper bound must be below WACC.")
+
+    years = len(reference_forecast)
+    start_year = int(reference_forecast.index[0]) if len(reference_forecast.index) else 1
+    reference_growth = _forecast_driver(reference_forecast, "revenue_growth", 0.0)
+    reference_margin = _forecast_driver(reference_forecast, "operating_margin", 0.0)
+    fixed_margin = operating_margin if operating_margin is not None else reference_margin
+    tax = _forecast_driver(reference_forecast, "tax_rate", 0.21)
+    da_rates = ((reference_forecast["da"] / reference_forecast["revenue"]).astype(float).tolist()
+                if {"da", "revenue"}.issubset(reference_forecast.columns) else [0.0] * years)
+    capex_rates = ((reference_forecast["capex"] / reference_forecast["revenue"]).astype(float).tolist()
+                   if {"capex", "revenue"}.issubset(reference_forecast.columns) else [0.0] * years)
+    incremental_revenue = pd.to_numeric(reference_forecast["revenue"], errors="coerce").diff()
+    incremental_revenue.iloc[0] = float(reference_forecast["revenue"].iloc[0]) - base_revenue
+    nwc_rates = (pd.to_numeric(reference_forecast.get("change_nwc", 0.0), errors="coerce") /
+                 incremental_revenue.replace(0, np.nan)).fillna(0.0).astype(float).tolist()
+
+    def value_for(assumption):
+        if mode == "terminal_growth":
+            forecast, growth = reference_forecast, assumption
+        else:
+            growth_rates = [assumption] * years if mode == "revenue_growth" else reference_growth
+            margins = [assumption] * years if mode == "operating_margin" else fixed_margin
+            forecast = build_forecast_from_inputs(
+                float(base_revenue), growth_rates, margins, tax, da_rates, capex_rates,
+                nwc_rates, scenario="market_implied", start_year=start_year,
+            )
+            growth = terminal_growth
+        valuation = run_dcf(forecast, wacc, growth, cash, debt, shares_outstanding)
+        return valuation["implied_share_price"], forecast, valuation
+
+    solved, iterations, _ = _solve_bounded(
+        lambda assumption: value_for(assumption)[0] - target_share_price,
+        float(lower), float(upper), tolerance=tolerance, max_iterations=max_iterations,
+    )
+    implied_price, implied_forecast, valuation = value_for(solved)
+    return {
+        "mode": mode, "implied_assumption": solved, "target_share_price": target_share_price,
+        "implied_share_price": implied_price, "price_residual": implied_price - target_share_price,
+        "converged": True, "iterations": iterations, "lower_bound": lower,
+        "upper_bound": upper, "wacc": wacc,
+        "terminal_growth": solved if mode == "terminal_growth" else terminal_growth,
+        "forecast": implied_forecast, "valuation": valuation,
+    }
+
+
+def build_reverse_dcf_summary(
+    forecasts, base_revenue, target_share_price, wacc, terminal_growth, cash, debt,
+    shares_outstanding, *, modes=("revenue_growth", "terminal_growth", "operating_margin"),
+):
+    """Return market-implied assumptions plus Bear/Base/Bull comparison outputs."""
+    if "base" not in forecasts:
+        raise ValueError("forecasts must contain a base case.")
+    rows = []
+    for mode in modes:
+        result = solve_reverse_dcf(
+            base_revenue, forecasts["base"], target_share_price, wacc,
+            terminal_growth, cash, debt, shares_outstanding, mode=mode,
+        )
+        rows.append({key: result[key] for key in (
+            "mode", "implied_assumption", "target_share_price", "implied_share_price",
+            "price_residual", "converged", "iterations", "lower_bound", "upper_bound",
+            "wacc", "terminal_growth",
+        )})
+    implied = pd.DataFrame(rows).set_index("mode")
+    comparison = value_scenarios(
+        forecasts, wacc, terminal_growth, cash, debt, shares_outstanding
+    ).reset_index()
+    comparison["case_type"] = "Forecast"
+    comparison["current_price"] = target_share_price
+    comparison["upside_downside"] = comparison["implied_share_price"] / target_share_price - 1
+    comparison = pd.concat([comparison, pd.DataFrame([{
+        "scenario": "market_implied", "case_type": "Market implied",
+        "implied_share_price": target_share_price, "current_price": target_share_price,
+        "upside_downside": 0.0,
+    }])], ignore_index=True)
+    return implied, comparison

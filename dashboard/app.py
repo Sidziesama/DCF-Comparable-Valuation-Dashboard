@@ -169,6 +169,23 @@ def load_data():
         index_col=0,
     )
 
+    model_checks = load_csv("model_checks_detail.csv")
+    model_health = load_csv("model_health_summary.csv")
+    analytics_trends = load_csv("analytics_trends.csv")
+    forecast_reasonableness = load_csv("forecast_reasonableness.csv")
+    reverse_dcf = load_csv("reverse_dcf.csv", index_col=0)
+    reverse_comparison = load_csv("reverse_dcf_comparison.csv")
+
+    three_statements = {}
+    for scenario in ("bear", "base", "bull"):
+        three_statements[scenario] = {
+            "Income statement": load_csv(f"income_statement_{scenario}.csv", index_col=0),
+            "Balance sheet": load_csv(f"balance_sheet_{scenario}.csv", index_col=0),
+            "Cash flow": load_csv(f"cash_flow_statement_{scenario}.csv", index_col=0),
+            "FCFF bridge": load_csv(f"fcff_forecast_{scenario}.csv", index_col=0),
+            "Checks": load_csv(f"checks_{scenario}.csv", index_col=0),
+        }
+
     return {
         "historical": historical,
         "forecast_bear": forecast_bear,
@@ -185,6 +202,13 @@ def load_data():
         "wacc_report": wacc_report,
         "latest_balance": latest_balance,
         "trading_comps": trading_comps,
+        "three_statements": three_statements,
+        "model_checks": model_checks,
+        "model_health": model_health,
+        "analytics_trends": analytics_trends,
+        "forecast_reasonableness": forecast_reasonableness,
+        "reverse_dcf": reverse_dcf,
+        "reverse_comparison": reverse_comparison,
     }
 
 
@@ -376,6 +400,8 @@ tabs = st.tabs(
         "Valuation",
         "Interactive DCF",
         "Three Statements",
+        "Model Health & Analytics",
+        "Reverse DCF",
     ]
 )
 
@@ -386,6 +412,95 @@ comps_tab = tabs[3]
 valuation_tab = tabs[4]
 interactive_tab = tabs[5]
 statements_tab = tabs[6]
+health_tab = tabs[7]
+reverse_tab = tabs[8]
+
+
+# =========================================================
+# REVERSE DCF TAB
+# =========================================================
+
+with reverse_tab:
+    st.subheader("Reverse DCF")
+    st.caption("Assumptions implied by the current share price using bounded, convergent DCF solves.")
+    implied = data["reverse_dcf"].copy()
+    mode_labels = {
+        "revenue_growth": "Near-term revenue growth",
+        "operating_margin": "Operating margin",
+        "terminal_growth": "Terminal growth",
+    }
+    columns = st.columns(max(1, len(implied)))
+    for column, (mode, row) in zip(columns, implied.iterrows()):
+        column.metric(mode_labels.get(mode, mode.replace("_", " ").title()), percentage(row["implied_assumption"]))
+        column.caption(f"Converged in {int(row['iterations'])} iterations; residual {money(row['price_residual'], 4)}")
+    comparison = data["reverse_comparison"].copy()
+    fig = px.bar(comparison, x="scenario", y="implied_share_price", color="case_type",
+                 title="Bear / Base / Bull vs Market-Implied Price")
+    fig.add_hline(y=current_price, line_dash="dash", annotation_text="Current price")
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(implied.style.format({
+        "implied_assumption": "{:.2%}", "target_share_price": "${:,.2f}",
+        "implied_share_price": "${:,.2f}", "price_residual": "${:,.6f}",
+        "lower_bound": "{:.1%}", "upper_bound": "{:.1%}", "wacc": "{:.2%}",
+        "terminal_growth": "{:.2%}",
+    }), use_container_width=True)
+    workbook_path = DATA / f"{config['ticker'].lower()}_valuation_model.xlsx"
+    if workbook_path.exists():
+        st.download_button("Download professional Excel model", data=workbook_path.read_bytes(),
+                           file_name=workbook_path.name,
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# =========================================================
+# MODEL HEALTH + ANALYTICS TAB
+# =========================================================
+
+with health_tab:
+    st.subheader("Model Health & Analytics")
+    st.caption("Check-level diagnostics, explicit tolerances, and historical-versus-forecast reasonableness.")
+    checks = data["model_checks"]
+    failures = int(checks["status"].eq("FAIL").sum())
+    warnings = int(data["forecast_reasonableness"]["status"].eq("WARN").sum())
+    unavailable = int(checks["status"].eq("N/A").sum())
+    health_columns = st.columns(4)
+    health_columns[0].metric("Overall model status", "PASS" if failures == 0 else "FAIL")
+    health_columns[1].metric("Failed checks", failures)
+    health_columns[2].metric("Reasonableness warnings", warnings)
+    health_columns[3].metric("Unavailable checks", unavailable)
+    if failures:
+        st.error("One or more institutional model checks failed.")
+    else:
+        st.success("All available model integrity checks pass within their stated tolerances.")
+
+    st.subheader("Validation Summary")
+    st.dataframe(data["model_health"], use_container_width=True, hide_index=True)
+    with st.expander("Check-level detail"):
+        st.dataframe(checks, use_container_width=True, hide_index=True)
+
+    st.subheader("Historical vs Forecast Trends")
+    trends = data["analytics_trends"].dropna(subset=["value"]).copy()
+    metric_options = sorted(trends["metric"].unique())
+    selected_metric = st.selectbox("Analytical metric", metric_options)
+    selected_trends = trends[trends["metric"].eq(selected_metric)].copy()
+    selected_trends["series"] = np.where(
+        selected_trends["scope"].eq("Historical"), "Historical", selected_trends["scenario"].str.title()
+    )
+    selected_trends["period"] = selected_trends["period"].astype(str)
+    fig = px.line(selected_trends, x="period", y="value", color="series", markers=True, title=selected_metric)
+    if selected_trends["unit"].eq("ratio").all():
+        fig.update_yaxes(tickformat=".1%")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Forecast Reasonableness")
+    reasonableness = data["forecast_reasonableness"].copy()
+    st.dataframe(
+        reasonableness.style.format({
+            "forecast_average": "{:.1%}", "historical_average": "{:.1%}",
+            "historical_min": "{:.1%}", "historical_max": "{:.1%}",
+        }, na_rep="—"),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # =========================================================
@@ -445,23 +560,30 @@ with interactive_tab:
 
 with statements_tab:
     st.subheader("Linked Three-Statement Forecast")
+    st.caption("Income statement, balance sheet, cash flow and DCF are driven by the same scenario model.")
     statement_scenario = st.radio("Statement scenario", ["Bear", "Base", "Bull"], index=1, horizontal=True).lower()
-    statement_files = {
-        "Income statement": DATA / f"income_statement_{statement_scenario}.csv",
-        "Balance sheet": DATA / f"balance_sheet_{statement_scenario}.csv",
-        "Cash flow": DATA / f"cash_flow_statement_{statement_scenario}.csv",
-        "Checks": DATA / f"checks_{statement_scenario}.csv",
-    }
-    if not all(path.exists() for path in statement_files.values()):
-        st.info("Run `python src/three_statement_model.py` to generate linked schedules.")
+    statement_data = data["three_statements"][statement_scenario]
+    checks = statement_data["Checks"]
+    maximum_error = float(checks["max_abs_error"].max())
+    status = "OK" if checks["status"].eq("OK").all() else "ERROR"
+    status_columns = st.columns(3)
+    status_columns[0].metric("Model status", status)
+    status_columns[1].metric("Maximum reconciliation error", f"{maximum_error:,.8f}M")
+    status_columns[2].metric(
+        "Terminal FCFF", money(statement_data["FCFF bridge"]["fcff"].iloc[-1], 1)
+    )
+    if status == "OK":
+        st.success("All statement roll-forwards and the FCFF bridge reconcile.")
     else:
-        selected_statement = st.selectbox("Statement", list(statement_files))
-        statement = pd.read_csv(statement_files[selected_statement], index_col=0)
-        if selected_statement == "Checks":
-            st.dataframe(statement.style.format("{:,.8f}"), use_container_width=True)
-            st.success(f"Statements reconcile; maximum error is {statement.abs().to_numpy().max():,.8f}M.")
-        else:
-            st.dataframe(statement.style.format("${:,.1f}M"), use_container_width=True)
+        st.error("One or more model integrity checks failed.")
+    selected_statement = st.selectbox("Statement", list(statement_data))
+    statement = statement_data[selected_statement]
+    if selected_statement == "Checks":
+        numeric_columns = statement.select_dtypes(include=[np.number]).columns
+        st.dataframe(statement.style.format({column: "{:,.8f}" for column in numeric_columns}), use_container_width=True)
+    else:
+        numeric_columns = statement.select_dtypes(include=[np.number]).columns
+        st.dataframe(statement.style.format({column: "${:,.1f}M" for column in numeric_columns}), use_container_width=True)
 
 
 # =========================================================

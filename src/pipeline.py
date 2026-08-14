@@ -53,6 +53,16 @@ from forecast_model import (
     build_all_scenarios,
 )
 
+from three_statement_model import (
+    STATEMENT_TOLERANCE,
+    build_three_statement_forecast,
+)
+
+from model_quality import (
+    build_historical_forecast_analytics,
+    build_model_checks,
+)
+
 
 # =========================================================
 # MARKET + WACC
@@ -76,7 +86,10 @@ from wacc_model import (
 from valuation import (
     value_scenarios,
     build_sensitivity_table,
+    build_reverse_dcf_summary,
 )
+
+from excel_export import export_valuation_workbook
 
 from valuation_summary import (
     build_valuation_summary,
@@ -513,21 +526,54 @@ def run():
         "6. FORECAST SCENARIOS"
     )
 
-    forecasts = (
+    operating_forecasts = (
         build_all_scenarios(
             historical,
             assumptions,
         )
     )
 
-    for scenario, forecast in (
-        forecasts.items()
+    forecasts = {}
+    all_statements = {}
+    three_statement_assumptions = assumptions.get("three_statement", {})
+
+    for scenario, operating_forecast in (
+        operating_forecasts.items()
     ):
+
+        statements = build_three_statement_forecast(
+            historical=historical,
+            latest_balance=latest_balance,
+            operating_forecast=operating_forecast,
+            assumptions=three_statement_assumptions,
+        )
+        all_statements[scenario] = statements
+
+        forecast = statements["fcff_forecast"]
+        forecasts[scenario] = forecast
 
         forecast.to_csv(
             processed
             / f"forecast_{scenario}.csv"
         )
+
+        for statement_name in [
+            "income_statement",
+            "balance_sheet",
+            "cash_flow_statement",
+            "fcff_forecast",
+            "checks",
+        ]:
+            statements[statement_name].to_csv(
+                processed / f"{statement_name}_{scenario}.csv"
+            )
+
+        maximum_error = float(statements["checks"]["max_abs_error"].max())
+        if maximum_error > STATEMENT_TOLERANCE:
+            raise RuntimeError(
+                f"{scenario.title()} three-statement model failed checks: "
+                f"{maximum_error:,.8f}"
+            )
 
         print(
             f"\n{scenario.upper()}"
@@ -548,6 +594,15 @@ def run():
             .round(4)
             .to_string()
         )
+
+    analytics_trends, reasonableness = build_historical_forecast_analytics(
+        historical=historical,
+        forecasts=forecasts,
+        latest_balance=latest_balance,
+        statements=all_statements,
+    )
+    analytics_trends.to_csv(processed / "analytics_trends.csv", index=False)
+    reasonableness.to_csv(processed / "forecast_reasonableness.csv", index=False)
 
 
     # =====================================================
@@ -799,6 +854,19 @@ def run():
         / "scenario_valuation.csv"
     )
 
+    check_detail, check_summary = build_model_checks(
+        all_statements,
+        wacc=wacc,
+        terminal_growth=terminal_growth,
+        terminal_value_pct_ev=scenario_values["terminal_value_pct_ev"].to_dict(),
+    )
+    check_detail.to_csv(processed / "model_checks_detail.csv", index=False)
+    check_summary.to_csv(processed / "model_health_summary.csv", index=False)
+    failed_checks = check_detail[check_detail["status"].eq("FAIL")]
+    if not failed_checks.empty:
+        failures = failed_checks[["scenario", "period", "check"]].to_dict("records")
+        raise RuntimeError(f"Institutional model checks failed: {failures}")
+
     print(
         scenario_values
         .round(4)
@@ -856,9 +924,50 @@ def run():
         .to_string()
     )
 
+    # =====================================================
+    # 14. REVERSE DCF + EXCEL EXPORT
+    # =====================================================
+
+    section("12. REVERSE DCF + EXCEL EXPORT")
+    reverse_dcf, reverse_comparison = build_reverse_dcf_summary(
+        forecasts=forecasts,
+        base_revenue=float(historical.loc["LTM", "revenue"]),
+        target_share_price=current_price,
+        wacc=wacc,
+        terminal_growth=terminal_growth,
+        cash=cash,
+        debt=debt,
+        shares_outstanding=shares_outstanding,
+    )
+    reverse_dcf.to_csv(processed / "reverse_dcf.csv")
+    reverse_comparison.to_csv(processed / "reverse_dcf_comparison.csv", index=False)
+
+    optional_outputs = {}
+    for key, filename in {
+        "trading_comps": "trading_comparables.csv",
+        "football_field": "football_field.csv",
+    }.items():
+        path = processed / filename
+        optional_outputs[key] = pd.read_csv(path, index_col=0) if path.exists() else None
+    workbook_path = processed / f"{ticker.lower()}_valuation_model.xlsx"
+    export_valuation_workbook(
+        workbook_path,
+        company_name=cfg["company_name"], ticker=ticker,
+        historical=historical, forecasts=forecasts, assumptions=assumptions,
+        wacc=wacc, terminal_growth=terminal_growth, cash=cash, debt=debt,
+        shares_outstanding=shares_outstanding, current_price=current_price,
+        reverse_dcf=reverse_dcf, statements=all_statements,
+        trading_comps=optional_outputs["trading_comps"],
+        football_field=optional_outputs["football_field"],
+        dcf_sensitivity=sensitivity, model_checks=check_detail,
+        analytics=analytics_trends, wacc_report=wacc_report,
+    )
+    print(reverse_dcf.round(4).to_string())
+    print(f"Excel model: {workbook_path}")
+
 
     # =====================================================
-    # 14. FINAL SUMMARY
+    # 15. FINAL SUMMARY
     # =====================================================
 
     section(
