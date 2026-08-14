@@ -918,73 +918,27 @@ def run():
     )
 
 
+def run_consolidated_valuation():
+    """Build and print the consolidated valuation after the core pipeline."""
+    section("13. CONSOLIDATED VALUATION")
+    valuation_results = build_valuation_summary()
+    consolidated = valuation_results["consolidated"]
+    football_field = valuation_results["football_field"]
+    central_range = valuation_results["central_range"]
+
+    print("\nCONSOLIDATED VALUATION")
+    print(consolidated.round(4).to_string(index=False))
+    print("\nVALUATION FOOTBALL FIELD")
+    print(football_field.round(2).to_string(index=False))
+    print("\nCENTRAL VALUATION RANGE")
+    for key, value in central_range.items():
+        print(f"{key:20s}: ${value:,.2f}")
+
+
 # =========================================================
 # ENTRY POINT
 # =========================================================
 
 if __name__ == "__main__":
-
     run()
-# =========================================================
-# CONSOLIDATED VALUATION
-# =========================================================
-
-section(
-   "13. CONSOLIDATED VALUATION"
-)
-
-valuation_results = (
-    build_valuation_summary()
-)
-
-consolidated = valuation_results[
-    "consolidated"
-]
-
-football_field = valuation_results[
-    "football_field"
-]
-
-central_range = valuation_results[
-    "central_range"
-]
-
-
-print(
-    "\nCONSOLIDATED VALUATION"
-)
-
-print(
-    consolidated
-    .round(4)
-    .to_string(
-        index=False
-    )
-)
-
-
-print(
-    "\nVALUATION FOOTBALL FIELD"
-)
-
-print(
-    football_field
-    .round(2)
-    .to_string(
-        index=False
-    )
-)
-
-
-print(
-    "\nCENTRAL VALUATION RANGE"
-)
-
-for key, value in (
-    central_range.items()
-):
-
-    print(
-        f"{key:20s}: "
-        f"${value:,.2f}"
-    )
+    run_consolidated_valuation()

@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 import numpy as np
 import pandas as pd
@@ -6,6 +7,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from valuation import run_dcf, run_exit_multiple_dcf
 
 
 # =========================================================
@@ -370,6 +374,8 @@ tabs = st.tabs(
         "DCF",
         "Trading Comps",
         "Valuation",
+        "Interactive DCF",
+        "Three Statements",
     ]
 )
 
@@ -378,6 +384,84 @@ financials_tab = tabs[1]
 dcf_tab = tabs[2]
 comps_tab = tabs[3]
 valuation_tab = tabs[4]
+interactive_tab = tabs[5]
+statements_tab = tabs[6]
+
+
+# =========================================================
+# INTERACTIVE DCF TAB
+# =========================================================
+
+with interactive_tab:
+    st.subheader("Interactive Scenario Engine")
+    st.caption("Recalculates from cached pipeline outputs; no SEC or market-data requests.")
+
+    control_1, control_2, control_3, control_4 = st.columns(4)
+    with control_1:
+        selected_scenario = st.radio(
+            "Operating scenario", ["Bear", "Base", "Bull"], index=1, horizontal=True
+        ).lower()
+    wacc_rows = data["wacc_report"].set_index(data["wacc_report"].columns[0])
+    base_wacc = float(wacc_rows.loc["WACC"].iloc[0])
+    with control_2:
+        selected_wacc_pct = st.slider("WACC", 5.0, 12.0, base_wacc * 100, 0.05, format="%.2f%%")
+    with control_3:
+        selected_growth_pct = st.slider(
+            "Terminal growth", 0.0, min(6.0, selected_wacc_pct - 0.25),
+            float(config["assumptions"]["terminal_growth"]) * 100, 0.05, format="%.2f%%"
+        )
+    with control_4:
+        selected_multiple = st.slider("Terminal EV / EBITDA", 8.0, 30.0, 16.0, 0.5, format="%.1fx")
+
+    selected_forecast = data[f"forecast_{selected_scenario}"].copy()
+    if "ebitda" not in selected_forecast and {"ebit", "da"}.issubset(selected_forecast.columns):
+        selected_forecast["ebitda"] = selected_forecast["ebit"] + selected_forecast["da"]
+    balance_map = data["latest_balance"].set_index("metric")["value"].to_dict()
+    selected_cash = float(balance_map.get("cash", 0.0))
+    selected_debt = float(balance_map.get("short_term_debt", 0.0)) + float(balance_map.get("long_term_debt", 0.0))
+    selected_shares = float((gordon_dcf["equity_value"] / gordon_dcf["implied_share_price"]).median())
+    live_gordon = run_dcf(selected_forecast, selected_wacc_pct / 100, selected_growth_pct / 100, selected_cash, selected_debt, selected_shares)
+    live_exit = run_exit_multiple_dcf(selected_forecast, selected_wacc_pct / 100, selected_multiple, selected_cash, selected_debt, selected_shares)
+
+    result_columns = st.columns(4)
+    result_columns[0].metric("Market price", money(current_price, 2))
+    result_columns[1].metric("Gordon DCF", money(live_gordon["implied_share_price"], 2), percentage(live_gordon["implied_share_price"] / current_price - 1))
+    result_columns[2].metric("Exit-multiple DCF", money(live_exit["implied_share_price"], 2), percentage(live_exit["implied_share_price"] / current_price - 1))
+    result_columns[3].metric("Terminal value / EV", percentage(live_gordon["terminal_value_pct_ev"]))
+
+    bridge = pd.DataFrame(
+        {
+            "Gordon growth": [live_gordon[key] for key in ("enterprise_value", "cash", "debt", "equity_value")],
+            "Exit multiple": [live_exit[key] for key in ("enterprise_value", "cash", "debt", "equity_value")],
+        },
+        index=["Enterprise value", "+ Cash", "− Debt", "Equity value"],
+    )
+    st.dataframe(bridge.style.format("${:,.0f}M"), use_container_width=True)
+
+
+# =========================================================
+# THREE-STATEMENT TAB
+# =========================================================
+
+with statements_tab:
+    st.subheader("Linked Three-Statement Forecast")
+    statement_scenario = st.radio("Statement scenario", ["Bear", "Base", "Bull"], index=1, horizontal=True).lower()
+    statement_files = {
+        "Income statement": DATA / f"income_statement_{statement_scenario}.csv",
+        "Balance sheet": DATA / f"balance_sheet_{statement_scenario}.csv",
+        "Cash flow": DATA / f"cash_flow_statement_{statement_scenario}.csv",
+        "Checks": DATA / f"checks_{statement_scenario}.csv",
+    }
+    if not all(path.exists() for path in statement_files.values()):
+        st.info("Run `python src/three_statement_model.py` to generate linked schedules.")
+    else:
+        selected_statement = st.selectbox("Statement", list(statement_files))
+        statement = pd.read_csv(statement_files[selected_statement], index_col=0)
+        if selected_statement == "Checks":
+            st.dataframe(statement.style.format("{:,.8f}"), use_container_width=True)
+            st.success(f"Statements reconcile; maximum error is {statement.abs().to_numpy().max():,.8f}M.")
+        else:
+            st.dataframe(statement.style.format("${:,.1f}M"), use_container_width=True)
 
 
 # =========================================================
