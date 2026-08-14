@@ -78,6 +78,9 @@ from valuation import (
     build_sensitivity_table,
 )
 
+from valuation_summary import (
+    build_valuation_summary,
+)
 
 # =========================================================
 # PATHS
@@ -859,7 +862,7 @@ def run():
     # =====================================================
 
     section(
-        "12. VALUATION SUMMARY"
+        "12. DCF SUMMARY"
     )
 
     print(
@@ -922,3 +925,66 @@ def run():
 if __name__ == "__main__":
 
     run()
+# =========================================================
+# CONSOLIDATED VALUATION
+# =========================================================
+
+section(
+   "13. CONSOLIDATED VALUATION"
+)
+
+valuation_results = (
+    build_valuation_summary()
+)
+
+consolidated = valuation_results[
+    "consolidated"
+]
+
+football_field = valuation_results[
+    "football_field"
+]
+
+central_range = valuation_results[
+    "central_range"
+]
+
+
+print(
+    "\nCONSOLIDATED VALUATION"
+)
+
+print(
+    consolidated
+    .round(4)
+    .to_string(
+        index=False
+    )
+)
+
+
+print(
+    "\nVALUATION FOOTBALL FIELD"
+)
+
+print(
+    football_field
+    .round(2)
+    .to_string(
+        index=False
+    )
+)
+
+
+print(
+    "\nCENTRAL VALUATION RANGE"
+)
+
+for key, value in (
+    central_range.items()
+):
+
+    print(
+        f"{key:20s}: "
+        f"${value:,.2f}"
+    )

@@ -100,3 +100,8 @@ assumptions:
     pre_tax_cost_of_debt: 0.035
 
   terminal_growth: 0.025
+  
+  terminal_exit_multiple:
+    bear: 14.0
+    base: 16.0
+    bull: 18.0
