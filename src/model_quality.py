@@ -79,6 +79,11 @@ def build_model_checks(
         cash_flow = model["cash_flow_statement"]
         fcff = model["fcff_forecast"]
         engine_checks = model.get("checks", pd.DataFrame())
+        wc_schedule = model.get("working_capital_schedule", pd.DataFrame())
+        ppe_schedule = model.get("ppe_schedule", pd.DataFrame())
+        debt_schedule = model.get("debt_schedule", pd.DataFrame())
+        equity_schedule = model.get("equity_schedule", pd.DataFrame())
+        historical_income = model.get("historical_income_statement", pd.DataFrame())
         opening_debt = None
         opening_equity = None
         for period in balance.index:
@@ -97,6 +102,30 @@ def build_model_checks(
                 _check_row(scenario, period, "FCFF", "FCFF reconciliation",
                     bridge.get("fcff"), bridge.get("nopat") + bridge.get("da") - bridge.get("capex") - bridge.get("change_nwc"), tolerance=statement_tol),
             ])
+            if period in wc_schedule.index:
+                schedule = wc_schedule.loc[period]
+                rows.append(_check_row(scenario, period, "Working capital", "Working-capital schedule agrees to FCFF",
+                    schedule.get("change_in_nwc"), bridge.get("change_nwc"), tolerance=statement_tol))
+            if period in ppe_schedule.index:
+                schedule = ppe_schedule.loc[period]
+                rows.extend([
+                    _check_row(scenario, period, "PP&E", "PP&E schedule roll-forward",
+                        schedule.get("ending_ppe"), schedule.get("beginning_ppe") + schedule.get("capex") - schedule.get("depreciation"), tolerance=statement_tol),
+                    _check_row(scenario, period, "PP&E", "PP&E schedule agrees to balance sheet",
+                        schedule.get("ending_ppe"), bs.get("ppe"), tolerance=statement_tol),
+                ])
+            if period in debt_schedule.index:
+                schedule = debt_schedule.loc[period]
+                rows.extend([
+                    _check_row(scenario, period, "Debt", "Debt schedule roll-forward",
+                        schedule.get("ending_debt"), schedule.get("beginning_debt") + schedule.get("debt_issuance") - schedule.get("debt_repayment"), tolerance=statement_tol),
+                    _check_row(scenario, period, "Debt", "Interest agrees to debt schedule",
+                        inc.get("interest_expense"), schedule.get("interest_expense"), tolerance=statement_tol),
+                ])
+            if period in equity_schedule.index:
+                schedule = equity_schedule.loc[period]
+                rows.append(_check_row(scenario, period, "Equity", "Retained earnings schedule roll-forward",
+                    schedule.get("ending_retained_earnings"), schedule.get("beginning_retained_earnings") + schedule.get("net_income") - schedule.get("dividends"), tolerance=statement_tol))
             if period in engine_checks.index:
                 control = engine_checks.loc[period]
                 rows.extend([
@@ -123,6 +152,15 @@ def build_model_checks(
                     bs.get("equity"), bs.get("equity"), tolerance=statement_tol,
                     detail="Opening retained earnings is unavailable; first-year total-equity roll-forward is tested in the model engine."))
             opening_debt, opening_equity = ending_debt, _number(bs.get("equity"))
+
+        if "LTM" in historical_income.index and len(fcff):
+            first = fcff.iloc[0]
+            ltm_revenue = historical_income.loc["LTM"].get("revenue")
+            implied_growth = _safe_divide(_number(first.get("revenue")) - _number(ltm_revenue), ltm_revenue)
+            rows.append(_check_row(scenario, "LTM", "Historical tie-out", "LTM-to-forecast revenue bridge",
+                first.get("revenue_growth"), implied_growth,
+                tolerance=max(absolute_tolerance, relative_tolerance),
+                available=np.isfinite(_number(ltm_revenue))))
 
         tv_pct = _number(terminal_value_pct_ev.get(scenario))
         rows.append(_check_row(scenario, "Terminal", "Terminal value", "WACC exceeds terminal growth",

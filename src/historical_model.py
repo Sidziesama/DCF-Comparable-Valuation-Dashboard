@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
 
-from financials import (
-    build_ltm,
-    build_latest_balance_sheet,
-)
+try:
+    from .financials import build_ltm, build_latest_balance_sheet
+except ImportError:  # Support direct execution from src/ for legacy scripts.
+    from financials import build_ltm, build_latest_balance_sheet
 
 
 FLOW_METRICS = [
@@ -14,6 +14,7 @@ FLOW_METRICS = [
     "tax_expense",
     "net_income",
     "depreciation",
+    "amortization",
     "cfo",
     "capex",
 ]
@@ -82,14 +83,12 @@ def append_ltm(
     annual_df,
     quarterly_df,
 ):
-    """
-    Add LTM June-2026 as the latest period.
-    """
+    """Add the latest inferable LTM period."""
 
     ltm = build_ltm(
         annual_df,
         quarterly_df,
-        fiscal_year=2026,
+        fiscal_year=None,
     )
 
     ltm_series = (
@@ -166,15 +165,17 @@ def calculate_ratios(model):
         df["cfo"]
         - df["capex"]
     )
-    if "depreciation" in df.columns:
+    da_components = [column for column in ("depreciation", "amortization") if column in df.columns]
+    if da_components:
+        df["depreciation_and_amortization"] = df[da_components].fillna(0).sum(axis=1)
 
         df["ebitda"] = (
             df["operating_income"]
-            + df["depreciation"]
+            + df["depreciation_and_amortization"]
         )
 
         df["da_pct_revenue"] = (
-            df["depreciation"]
+            df["depreciation_and_amortization"]
             / df["revenue"]
         )
 

@@ -18,6 +18,21 @@ except ImportError:
 
 
 STATEMENT_TOLERANCE = 1e-6
+STATEMENT_SCHEMA_VERSION = "2.0"
+
+# Stable public schemas.  Adapters supply drivers; this module owns accounting.
+INCOME_STATEMENT_COLUMNS = ("revenue", "operating_expenses", "ebit",
+    "interest_expense", "pretax_income", "tax_expense", "net_income")
+BALANCE_SHEET_COLUMNS = ("cash", "accounts_receivable", "other_current_assets",
+    "current_assets", "ppe", "other_assets", "total_assets", "accounts_payable",
+    "other_current_liabilities", "short_term_debt", "current_liabilities",
+    "long_term_debt", "other_long_term_liabilities", "total_liabilities",
+    "retained_earnings", "treasury_stock", "equity",
+    "total_liabilities_and_equity")
+CASH_FLOW_STATEMENT_COLUMNS = ("net_income", "depreciation",
+    "change_in_working_capital", "cfo", "capex", "cfi", "debt_issuance",
+    "debt_repayment", "dividends", "buybacks", "cff", "net_change_in_cash",
+    "beginning_cash", "ending_cash")
 
 
 def _value(balance: Mapping[str, float], name: str, default: float = 0.0) -> float:
@@ -33,6 +48,27 @@ def _driver(value: float | Sequence[float], offset: int) -> float:
 
 def _safe_ratio(numerator: float, denominator: float, default: float) -> float:
     return numerator / denominator if denominator else default
+
+
+def standardize_historical_statements(
+    historical: pd.DataFrame, latest_balance: pd.DataFrame
+) -> dict[str, pd.DataFrame]:
+    """Map available normalized history to the canonical statement schemas."""
+    income = historical.rename(columns={"operating_income": "ebit"}).copy()
+    if {"revenue", "ebit"}.issubset(income.columns):
+        income["operating_expenses"] = income["revenue"] - income["ebit"]
+    income = income.reindex(columns=INCOME_STATEMENT_COLUMNS)
+    cash = historical.copy()
+    if "capex" in cash:
+        cash["capex"] = -pd.to_numeric(cash["capex"], errors="coerce").abs()
+    cash = cash.reindex(columns=CASH_FLOW_STATEMENT_COLUMNS)
+    values = latest_balance.set_index("metric")["value"].to_dict()
+    balance = pd.DataFrame(
+        [{column: values.get(column, pd.NA) for column in BALANCE_SHEET_COLUMNS}],
+        index=["LTM"],
+    )
+    return {"income_statement": income, "balance_sheet": balance,
+            "cash_flow_statement": cash}
 
 
 def build_three_statement_forecast(
@@ -66,6 +102,8 @@ def build_three_statement_forecast(
     buybacks_pct = assumptions.get("buybacks_pct_net_income", 0.70)
     debt_issuance = assumptions.get("debt_issuance", 0.0)
     debt_repayment = assumptions.get("debt_repayment", 0.0)
+    opening_shares = float(assumptions.get("opening_shares", 0.0))
+    buyback_price = assumptions.get("buyback_price", 0.0)
 
     short_term_debt = _value(balance, "short_term_debt")
     long_term_debt = _value(balance, "long_term_debt")
@@ -93,8 +131,13 @@ def build_three_statement_forecast(
         "cash": _value(balance, "cash"),
         "equity": _value(balance, "equity"),
         "debt": opening_debt,
+        "retained_earnings": _value(balance, "retained_earnings", _value(balance, "equity")),
+        "treasury_stock": abs(_value(balance, "treasury_stock")),
+        "shares": opening_shares,
     }
     income_rows, balance_rows, cash_rows, fcff_rows, check_rows = [], [], [], [], []
+    working_capital_rows, ppe_rows, debt_rows = [], [], []
+    equity_rows, capital_return_rows = [], []
 
     for offset, (year, operating) in enumerate(operating_forecast.iterrows()):
         revenue, ebit = float(operating["revenue"]), float(operating["ebit"])
@@ -109,12 +152,17 @@ def build_three_statement_forecast(
         net_income = pretax_income - tax_expense
         dividends = max(net_income, 0.0) * _driver(dividends_pct, offset)
         buybacks = max(net_income, 0.0) * _driver(buybacks_pct, offset)
+        price = _driver(buyback_price, offset)
+        repurchased_shares = buybacks / price if price > 0 else 0.0
 
         ar, ap = revenue * _driver(ar_pct, offset), revenue * _driver(ap_pct, offset)
         change_ar, change_ap = ar - previous["ar"], ap - previous["ap"]
         change_nwc = change_ar - change_ap
         ppe = previous["ppe"] + capex - da
         equity = previous["equity"] + net_income - dividends - buybacks
+        retained_earnings = previous["retained_earnings"] + net_income - dividends
+        treasury_stock = previous["treasury_stock"] + buybacks
+        ending_shares = previous["shares"] - repurchased_shares
         cfo = net_income + da - change_nwc
         cfi = -capex
         cff = issuance - repayment - dividends - buybacks
@@ -137,6 +185,7 @@ def build_three_statement_forecast(
             "ppe_roll_forward": ppe - previous["ppe"] - capex + da,
             "debt_roll_forward": ending_debt - previous["debt"] - issuance + repayment,
             "equity_roll_forward": equity - previous["equity"] - net_income + dividends + buybacks,
+            "retained_earnings_roll_forward": retained_earnings - previous["retained_earnings"] - net_income + dividends,
             "fcff_formula": fcff - (nopat + da - capex - change_nwc),
         }
 
@@ -152,6 +201,7 @@ def build_three_statement_forecast(
             "long_term_debt": ending_long_term_debt,
             "other_long_term_liabilities": other_long_term_liabilities,
             "total_liabilities": total_liabilities, "equity": equity,
+            "retained_earnings": retained_earnings, "treasury_stock": treasury_stock,
             "total_liabilities_and_equity": total_liabilities_equity})
         cash_rows.append({"year": year, "net_income": net_income, "depreciation": da,
             "change_in_working_capital": -change_nwc, "cfo": cfo, "capex": -capex,
@@ -159,6 +209,30 @@ def build_three_statement_forecast(
             "dividends": -dividends, "buybacks": -buybacks, "cff": cff,
             "net_change_in_cash": net_change_cash, "beginning_cash": previous["cash"],
             "ending_cash": cash})
+        working_capital_rows.append({"year": year, "revenue": revenue,
+            "accounts_receivable": ar, "accounts_payable": ap,
+            "operating_nwc": ar - ap, "change_in_nwc": change_nwc,
+            "ar_pct_revenue": ar / revenue if revenue else 0.0,
+            "ap_pct_revenue": ap / revenue if revenue else 0.0})
+        ppe_rows.append({"year": year, "beginning_ppe": previous["ppe"],
+            "capex": capex, "depreciation": da, "ending_ppe": ppe})
+        debt_rows.append({"year": year, "beginning_debt": previous["debt"],
+            "debt_issuance": issuance, "debt_repayment": repayment,
+            "ending_debt": ending_debt,
+            "average_debt": (previous["debt"] + ending_debt) / 2,
+            "interest_rate": _driver(interest_rate, offset),
+            "interest_expense": interest_expense})
+        equity_rows.append({"year": year,
+            "beginning_retained_earnings": previous["retained_earnings"],
+            "net_income": net_income, "dividends": dividends,
+            "ending_retained_earnings": retained_earnings,
+            "beginning_shares": previous["shares"],
+            "repurchased_shares": repurchased_shares, "ending_shares": ending_shares,
+            "treasury_stock": treasury_stock, "total_equity": equity})
+        capital_return_rows.append({"year": year, "net_income": net_income,
+            "dividends": dividends, "buybacks": buybacks,
+            "total_capital_returns": dividends + buybacks,
+            "payout_ratio": (dividends + buybacks) / net_income if net_income > 0 else 0.0})
         fcff_rows.append({**operating.to_dict(), "year": year, "nopat": nopat,
             "change_nwc": change_nwc, "fcff": fcff, "fcff_margin": fcff / revenue,
             "ebitda": ebit + da})
@@ -167,13 +241,24 @@ def build_three_statement_forecast(
             "operating_to_linked_fcff_variance": fcff - operating_fcff,
             "max_abs_error": max(abs(value) for value in checks.values()),
             "status": "OK" if all(abs(value) <= STATEMENT_TOLERANCE for value in checks.values()) else "ERROR"})
-        previous.update(ar=ar, ap=ap, ppe=ppe, cash=cash, equity=equity, debt=ending_debt)
+        previous.update(ar=ar, ap=ap, ppe=ppe, cash=cash, equity=equity, debt=ending_debt,
+            retained_earnings=retained_earnings, treasury_stock=treasury_stock,
+            shares=ending_shares)
 
     def frame(rows):
         return pd.DataFrame(rows).set_index("year")
 
-    return {"income_statement": frame(income_rows), "balance_sheet": frame(balance_rows),
+    standardized_history = standardize_historical_statements(historical, latest_balance)
+    return {"schema_version": STATEMENT_SCHEMA_VERSION,
+        "historical_income_statement": standardized_history["income_statement"],
+        "historical_balance_sheet": standardized_history["balance_sheet"],
+        "historical_cash_flow_statement": standardized_history["cash_flow_statement"],
+        "income_statement": frame(income_rows), "balance_sheet": frame(balance_rows),
         "cash_flow_statement": frame(cash_rows), "fcff_forecast": frame(fcff_rows),
+        "working_capital_schedule": frame(working_capital_rows),
+        "ppe_schedule": frame(ppe_rows), "debt_schedule": frame(debt_rows),
+        "equity_schedule": frame(equity_rows),
+        "capital_returns_schedule": frame(capital_return_rows),
         "checks": frame(check_rows)}
 
 

@@ -1,7 +1,8 @@
 from pathlib import Path
+import copy
 
 import pandas as pd
-import yaml
+from company_config import DEFAULT_CONFIG_PATH, CompanyWorkspace, load_company_config
 
 from market_data import (
     get_market_data,
@@ -15,6 +16,7 @@ from financials import (
 from forecast_model import (
     build_all_scenarios,
 )
+from adapters import get_adapter
 
 from wacc_model import (
     calculate_wacc,
@@ -25,8 +27,9 @@ from valuation import (
 )
 
 from comparables import (
+    apply_multiple_eligibility,
     build_comparable_table,
-    build_mastercard_implied_valuation,
+    build_direct_peer_implied_valuation,
 )
 
 from terminal_value import (
@@ -55,51 +58,27 @@ ROOT = (
 # CONFIG
 # =========================================================
 
-def load_config():
-
-    with open(
-        ROOT
-        / "config"
-        / "company.yaml",
-        "r",
-    ) as f:
-
-        return yaml.safe_load(f)
+def load_config(path=DEFAULT_CONFIG_PATH):
+    return load_company_config(path)
 
 
 def get_peer_list(
     config,
 ):
 
-    peer_config = (
-        config["peers"]
-    )
-
-    return (
-        peer_config.get(
-            "core_network",
-            [],
-        )
-        +
-        peer_config.get(
-            "payments_tech",
-            [],
-        )
-        +
-        peer_config.get(
-            "financial",
-            [],
-        )
-    )
+    peer_config = config.get("peers", {})
+    # Peer groups are company-defined; the core engine does not prescribe an
+    # industry taxonomy (software, payments, financials, etc.).
+    return [ticker for group in peer_config.values() for ticker in group]
 
 
 # =========================================================
 # BUILD VALUATION SUMMARY
 # =========================================================
 
-def build_valuation_summary():
+def build_valuation_summary(config_path=DEFAULT_CONFIG_PATH):
 
-    config = load_config()
+    config = load_config(config_path)
 
     assumptions = (
         config["assumptions"]
@@ -109,11 +88,7 @@ def build_valuation_summary():
         config["ticker"]
     )
 
-    processed = (
-        ROOT
-        / "data"
-        / "processed"
-    )
+    processed = CompanyWorkspace.from_config(config, ROOT).ensure()
 
 
     # =====================================================
@@ -215,7 +190,7 @@ def build_valuation_summary():
 
     beta_result = calculate_beta(
         ticker=ticker,
-        benchmark="SPY",
+        benchmark=(config.get("market", {}) or {}).get("benchmark", "SPY"),
         period="5y",
     )
 
@@ -278,10 +253,16 @@ def build_valuation_summary():
     # FORECASTS
     # =====================================================
 
+    summary_assumptions = copy.deepcopy(assumptions)
+    adapter = get_adapter(config.get("adapter", "generic"))
+    years = int(assumptions.get("forecast_years", config.get("forecast_years", 5)))
+    for scenario, scenario_cfg in summary_assumptions["scenarios"].items():
+        growth, _ = adapter.forecast_growth(scenario, scenario_cfg, years)
+        scenario_cfg["revenue_growth"] = growth
     forecasts = (
         build_all_scenarios(
             historical,
-            assumptions,
+            summary_assumptions,
         )
     )
 
@@ -296,20 +277,18 @@ def build_valuation_summary():
         ]
     )
 
-    gordon_dcf = (
-        value_scenarios(
-            forecasts=forecasts,
-            wacc=wacc,
-            terminal_growth=(
-                terminal_growth
-            ),
-            cash=cash,
-            debt=debt,
-            shares_outstanding=(
-                shares_outstanding
-            ),
+    # The linked three-statement pipeline owns the canonical Gordon-growth DCF.
+    # This consolidation layer consumes that output instead of recalculating a
+    # second value from the standalone operating forecast.
+    canonical_path = processed / "scenario_valuation.csv"
+    if not canonical_path.exists():
+        raise RuntimeError(
+            "Canonical scenario_valuation.csv is missing. Run src/pipeline.py "
+            "for this company before building the consolidated valuation."
         )
-    )
+    gordon_dcf = pd.read_csv(canonical_path, index_col=0)
+    if not {"bear", "base", "bull"}.issubset(set(gordon_dcf.index)):
+        raise RuntimeError("Canonical scenario valuation is missing bear/base/bull cases.")
 
     gordon_dcf[
         "current_price"
@@ -379,6 +358,10 @@ def build_valuation_summary():
             peers
         )
     )
+    comps = apply_multiple_eligibility(
+        comps,
+        (config.get("peer_methodology", {}) or {}).get("multiple_eligibility", {}),
+    )
 
     visa_metrics = {
 
@@ -407,8 +390,9 @@ def build_valuation_summary():
             ),
     }
 
+    direct_peer = config.get("valuation", {}).get("direct_peer", "MA")
     mastercard = (
-        build_mastercard_implied_valuation(
+        build_direct_peer_implied_valuation(
             comps=comps,
             visa_metrics=(
                 visa_metrics
@@ -418,6 +402,7 @@ def build_valuation_summary():
             shares_outstanding=(
                 shares_outstanding
             ),
+            peer_ticker=direct_peer,
         )
     )
 
@@ -487,12 +472,13 @@ def build_valuation_summary():
             exit_dcf=(
                 exit_dcf
             ),
-            mastercard_comps=(
+            direct_peer_comps=(
                 mastercard
             ),
             current_price=(
                 current_price
             ),
+            direct_peer_label=direct_peer,
         )
     )
 
@@ -608,7 +594,7 @@ def build_valuation_summary():
         rows.append(
             {
                 "method":
-                    "Mastercard Trading Comp",
+                    f"{direct_peer} Trading Comp",
 
                 "case":
                     row[
@@ -650,11 +636,15 @@ def build_valuation_summary():
         / "valuation_exit_dcf.csv"
     )
 
+    comps.to_csv(processed / "trading_comparables.csv")
+
     mastercard.to_csv(
         processed
-        / "valuation_mastercard_comps.csv",
+        / "valuation_direct_peer_comps.csv",
         index=False,
     )
+    if direct_peer == "MA":
+        mastercard.to_csv(processed / "valuation_mastercard_comps.csv", index=False)
 
     exit_sensitivity.to_csv(
         processed

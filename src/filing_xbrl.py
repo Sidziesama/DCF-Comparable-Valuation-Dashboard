@@ -261,7 +261,7 @@ def extract_contexts(soup):
 # Metric map
 # =========================================================
 
-def build_tag_to_metric_map():
+def build_tag_to_metric_map(taxonomy_aliases=None):
 
     mapping = {}
 
@@ -269,6 +269,10 @@ def build_tag_to_metric_map():
 
         for alias in aliases:
 
+            mapping[alias] = metric
+    for metric, aliases in (taxonomy_aliases or {}).items():
+        aliases = [aliases] if isinstance(aliases, str) else aliases
+        for alias in aliases:
             mapping[alias] = metric
 
     return mapping
@@ -315,6 +319,7 @@ def extract_dei_value(
 def extract_inline_xbrl(
     html: str,
     filing: dict,
+    taxonomy_aliases=None,
 ) -> pd.DataFrame:
 
     soup = BeautifulSoup(
@@ -327,7 +332,7 @@ def extract_inline_xbrl(
     )
 
     tag_to_metric = (
-        build_tag_to_metric_map()
+        build_tag_to_metric_map(taxonomy_aliases)
     )
 
     fiscal_year = extract_dei_value(
@@ -401,10 +406,9 @@ def extract_inline_xbrl(
         )
         # Skip dimensional / disaggregated facts.
         #
-        # Example:
-        # Visa may use the same accounting concept inside
-        # contexts describing client incentives, geography,
-        # or revenue categories. Those should not replace
+        # A filer may use the same accounting concept inside contexts
+        # describing product categories, geography, or other dimensions.
+        # Those should not replace
         # consolidated financial statement values.
 
         if context.get(
@@ -540,6 +544,7 @@ def fetch_latest_filing_facts(
     cik: str,
     filing: dict,
     user_agent: str,
+    taxonomy_aliases=None,
 ) -> pd.DataFrame:
 
     print(
@@ -565,6 +570,7 @@ def fetch_latest_filing_facts(
     facts = extract_inline_xbrl(
         html=html,
         filing=filing,
+        taxonomy_aliases=taxonomy_aliases,
     )
 
     facts = deduplicate_filing_facts(

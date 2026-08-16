@@ -110,6 +110,12 @@ ALIASES = {
         "DepreciationDepletionAndAmortization",
         "DepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
         "DepreciationAmortizationAndAccretionNet",
+        "Depreciation",
+    ],
+
+    "amortization": [
+        "AmortizationOfIntangibleAssets",
+        "FiniteLivedIntangibleAssetsAmortizationExpense",
     ],
 
     "cfo": [
@@ -259,7 +265,8 @@ def extract_observations(
 
 
 def build_raw_dataset(
-    cik: str
+    cik: str,
+    taxonomy_aliases: dict | None = None,
 ) -> pd.DataFrame:
 
     facts = fetch_companyfacts(cik)
@@ -268,7 +275,14 @@ def build_raw_dataset(
 
     selected_tags = {}
 
-    for metric, aliases in ALIASES.items():
+    taxonomy_aliases = taxonomy_aliases or {}
+    metrics = list(ALIASES) + [metric for metric in taxonomy_aliases if metric not in ALIASES]
+    for metric in metrics:
+        default_aliases = ALIASES.get(metric, [])
+        configured = taxonomy_aliases.get(metric, [])
+        if isinstance(configured, str):
+            configured = [configured]
+        aliases = list(configured) + [alias for alias in default_aliases if alias not in configured]
 
         tag, tag_object = find_xbrl_tag(
             facts,
@@ -330,12 +344,14 @@ def build_raw_dataset(
         "total_liabilities",
         "equity",
         "depreciation",
+        "amortization",
         "cfo",
         "capex",
         "cfi",
         "cff",
         "dividends",
         "buybacks",
+        "stock_based_compensation",
     ]
 
     mask = data["metric"].isin(

@@ -1,118 +1,209 @@
-# Visa DCF + Comparable Valuation Dashboard
+# Institutional Equity Research + Valuation Platform
 
-Reusable Python valuation architecture for public companies.
+Turn a company configuration and public filings into normalized financials, linked forecasts, multi-method valuation, market-implied expectations, evidence-backed research, thesis monitoring, and manager-ready reports.
 
-## Stack
-- SEC XBRL Company Facts API — historical financial statements
-- yfinance — market data
-- pandas / numpy — modeling
-- Plotly — visualization
-- Streamlit — dashboard
-- YAML — company-specific configuration
+This reusable Python platform is demonstrated end to end on two deliberately different companies: Visa, using a payment-network adapter, and Microsoft, using a software/cloud adapter. Both use the same financial, valuation, controls, research, reporting, dashboard, and export core.
 
-## Current company
-Visa Inc. (NYSE: V)
+> For research and portfolio demonstration only. Outputs are not investment advice.
+
+## What it solves
+
+Traditional valuation projects are often one-off spreadsheets with manual data movement, hidden assumptions, and weak auditability. This project makes company selection explicit in YAML, isolates outputs by ticker, reconciles a linked three-statement model, retains source lineage, and emits reviewable Excel, HTML, PDF, CSV, and JSON artifacts from one command.
 
 ## Architecture
-1. `src/sec_data.py` — SEC/XBRL ingestion
-2. `src/market_data.py` — market data ingestion
-3. `src/forecast_model.py` — reusable Bear/Base/Bull FCFF forecasts
-4. `src/valuation.py` — Gordon-growth and exit-multiple DCF engines
-5. `src/three_statement_model.py` — linked forecast statements and checks
-6. `src/model_quality.py` — institutional controls and historical/forecast analytics
-7. `src/pipeline.py` — end-to-end data and valuation orchestration
-8. `dashboard/app.py` — cached-data interactive scenario dashboard
-9. `config/company.yaml` — company assumptions and peers
-10. `src/excel_export.py` — reusable formula-driven professional workbook export
 
-## Setup on macOS / VS Code
+```mermaid
+flowchart LR
+  C[Company config] --> P[One-command pipeline]
+  S[SEC XBRL] --> N[Normalized financials]
+  P --> S
+  N --> H[Historical + LTM model]
+  C --> A[Sector adapter]
+  A --> F[Bear / Base / Bull forecasts]
+  H --> F
+  F --> T[Linked three statements + controls]
+  T --> V[DCF / comps / reverse DCF]
+  M[Market data] --> V
+  V --> R[Evidence / recommendation / monitoring]
+  R --> O[Excel / HTML / PDF / dashboard artifacts]
+```
+
+See [docs/architecture.md](docs/architecture.md) for ownership boundaries.
+
+## Feature matrix
+
+| Capability | Visa | Microsoft |
+|---|:---:|:---:|
+| SEC Company Facts + filing fallback | ✓ | ✓ |
+| Annual, quarterly, and LTM normalization | ✓ | ✓ |
+| Linked Bear/Base/Bull three statements | ✓ | ✓ |
+| Gordon-growth and exit-multiple DCF | ✓ | ✓ |
+| Sensitivities, comps, football field, reverse DCF | ✓ | ✓ |
+| Evidence-linked recommendation and thesis monitoring | ✓ | ✓ |
+| HTML/PDF institutional report and Excel model | ✓ | ✓ |
+| Company-scoped workspace and lineage manifest | ✓ | ✓ |
+| Sector adapter | Payment network | Software/cloud |
+| Disclosed KPI set | Volume, transactions, cross-border, incentives | Cloud, segments, growth, margin, subscribers |
+
+The adapter enriches operating logic; it does not fork the valuation engine. Missing observations stay unavailable rather than being estimated silently.
+
+## Quick start
+
+Requirements: Python 3.10+; macOS or Linux; internet access for live SEC and market data. A respectful SEC user agent is required for filing fallback.
 
 ```bash
+git clone <repository-url>
+cd visa_valuation
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env`:
+Set your own contact string in `.env`; never commit it:
 
 ```text
 SEC_USER_AGENT=Your Name your.email@example.com
 ```
 
-Run the pipeline (this now builds the linked statements before valuation):
+Run either complete workflow—no config edits required:
 
 ```bash
-python src/pipeline.py
+python src/pipeline.py --config config/company.yaml
+python src/pipeline.py --config config/microsoft.yaml
 ```
 
-Run the dashboard:
+Each command prints the company workspace, artifact manifest, Excel model, and report paths when complete. `config/company.yaml` remains the backward-compatible Visa config.
+
+Convenience targets are also available:
 
 ```bash
-streamlit run dashboard/app.py
+make test
+make visa
+make microsoft
+make demo
+make dashboard
 ```
 
-The dashboard reads only `data/processed/` outputs. Changing scenarios, WACC,
-terminal growth, or the terminal multiple does not refetch SEC or market data.
+Override `PYTHON` if needed, for example `make test PYTHON=.venv/bin/python`.
 
-## Model checks
+## Portfolio demo
+
+After both company runs, build an artifact-backed side-by-side case study:
 
 ```bash
-pytest -q
+python src/portfolio_demo.py
 ```
 
-Every three-statement scenario writes explicit controls to `checks_<scenario>.csv`:
+This writes machine-readable JSON plus Markdown and HTML to `docs/demo/`. It reads generated valuation, recommendation, KPI, health, monitoring, report, and lineage artifacts; it does not invent values. Company workspaces under `data/companies/` are ignored by Git by default; review the smaller demo outputs separately if you intend to publish them.
 
-- assets minus liabilities and equity
-- cash, PP&E, debt, and equity roll-forwards
-- FCFF formula and operating-to-linked FCFF variance
+Render the live dashboard with either config:
 
-All reconciliation controls must be zero before the pipeline proceeds to valuation.
-The operating-to-linked FCFF variance is an informational bridge: the linked
-model replaces the standalone working-capital estimate with forecast A/R and A/P.
+```bash
+streamlit run dashboard/app.py -- --config config/company.yaml
+streamlit run dashboard/app.py -- --config config/microsoft.yaml
+```
 
-The institutional quality layer also writes `model_checks_detail.csv` and
-`model_health_summary.csv`. Each available control reports actual, expected,
-variance, tolerance, and an explicit PASS/FAIL status. Checks cover statement
-reconciliation, cash, debt, total equity/retained-earnings consistency, FCFF,
-scenario ordering, the WACC/terminal-growth spread, and terminal-value
-concentration. The pipeline stops before completing when an available check fails.
+No screenshot is committed because current dashboard values depend on live run artifacts. These commands render the real interface locally.
 
-`analytics_trends.csv` and `forecast_reasonableness.csv` contain reusable
-historical/forecast analytics and range comparisons. ROIC and working-capital
-efficiency are reported only when the required historical or balance-sheet inputs
-are available; unavailable observations remain blank rather than being estimated.
+## Outputs
 
-## Important modeling note
+Every company writes to its own workspace:
 
-The first version intentionally separates:
-- raw historical data
-- assumptions
-- forecast logic
-- valuation logic
-- presentation
+```text
+data/companies/<ticker>/
+├── raw/          SEC facts
+├── normalized/   annual, quarterly, LTM, balance sheet
+├── derived/      forecasts, WACC, DCF and sensitivities
+├── model/        linked statements, checks, Excel workbook
+└── research/     comps, intelligence, evidence, recommendation,
+                  monitoring, reports and lineage manifest
+```
 
-This makes the same engine reusable for MA, AXP, JPM, MSFT, BLK, or another public company by changing configuration and, where necessary, adding company-specific XBRL aliases.
+Representative deliverables include:
 
-## Completed capabilities
+- `<ticker>_valuation_model.xlsx`: formula-driven model and review workbook
+- `<ticker>_investment_report.html` and `.pdf`: investment research report
+- `lineage_manifest.json`: artifact inventory and upstream source record
+- `recommendation.json`: deterministic rating, rationale, and thresholds
+- `evidence_store.json`, `research_claims.json`, `thesis_monitoring.json`
+- `scenario_valuation.csv`, `reverse_dcf.csv`, `football_field.csv`
 
-- SEC/XBRL ingestion with filing fallback and freshness validation
-- annual and LTM historical model
-- Bear/Base/Bull operating forecasts
-- beta, WACC, Gordon-growth DCF, exit-multiple DCF, and sensitivities
-- comparable-company valuation and football field
-- interactive cached-data dashboard
-- linked Bear/Base/Bull income statement, balance sheet, and cash-flow forecasts
-- statement-derived FCFF feeding the existing DCF and sensitivity engines
-- visible model-integrity checks in both pipeline outputs and dashboard
-- Model Health & Analytics dashboard with check-level diagnostics and trend views
-- bounded Reverse DCF solvers for market-implied revenue growth, operating margin,
-  and terminal growth, including Bear/Base/Bull comparison outputs
-- professional Excel export with linked valuation formulas, formatting, checks,
-  sensitivities, and dashboard download control
+## Configuration
 
-## Next build stages
+Identity and routing live at the top of each YAML file:
 
-1. Expand automated tests for SEC taxonomy edge cases.
-2. Add an investment-thesis and risk/catalyst research layer.
-3. Package deployment configuration and CI.
+```yaml
+ticker: MSFT
+company_name: Microsoft Corporation
+cik: "0000789019"
+adapter: software
+storage:
+  root: data/companies
+```
+
+Configs also contain fiscal calendar, XBRL aliases, peers and multiple eligibility, disclosed KPI observations with source URLs, scenario drivers, WACC and terminal assumptions, recommendation policy, reporting behavior, and thesis-monitoring thresholds. Validation fails early with the exact missing or invalid field path. `config/company.schema.yaml` documents the generic contract.
+
+## Methodology and controls
+
+The pipeline builds annual and quarterly histories, appends LTM, forecasts operating results, links all three statements, derives FCFF, estimates empirical beta and WACC, and values Bear/Base/Bull scenarios. `scenario_valuation.csv` is the canonical Gordon-growth output consumed by the consolidated tables, memo, report, and dashboard. Comparable-company analysis, a football field, and bounded reverse-DCF solvers provide additional lenses. The displayed primary-method central range uses Gordon-growth DCF and the configured direct-peer comp; exit-multiple DCF remains visible as a sensitivity/reference method and is not equally weighted into that central range.
+
+Hard controls include statement reconciliation; cash, debt, PP&E, equity, and retained-earnings roll-forwards; FCFF consistency; scenario ordering; WACC/terminal-growth spread; and terminal-value concentration. Available hard checks must pass before completion. The recommendation policy—not an LLM—sets BUY/HOLD/SELL/WATCH/NO-RATING based on valuation, downside, evidence, thesis confidence, and model health.
+
+Full detail: [docs/methodology.md](docs/methodology.md).
+
+## Testing
+
+```bash
+python -m pytest -q
+```
+
+Tests cover configuration, fiscal calendars and XBRL aliases, adapters, statement linkage and controls, valuation, research schemas, evidence integrity, reporting, CLI selection, company isolation, manifest refresh, and portfolio-demo generation. End-to-end runs require live external services and are verified separately with both configs.
+
+## Project structure
+
+```text
+config/                 Visa and Microsoft public sample configs
+dashboard/              Streamlit dashboard
+docs/                   architecture, methodology, limitations, case study
+src/adapters/            generic, payment-network, software adapters
+src/pipeline.py          end-to-end orchestration and CLI
+src/portfolio_demo.py    side-by-side artifact-backed demo generator
+src/                     ingestion, models, valuation, research, reports, export
+tests/                   automated unit and integration tests
+data/companies/          generated company-scoped workspaces
+Makefile                 common local commands
+```
+
+## Security and public-repository hygiene
+
+`.env` and local environments are ignored. `.env.example` contains only a placeholder. Sample configs reference public SEC URLs and environment-variable names; they contain no credentials or private API tokens. Review generated artifacts before publishing because they contain point-in-time market data and absolute paths in legacy report manifests.
+
+## Deployment and use
+
+This repository is a local research pipeline plus a read-only Streamlit presentation layer. Generate and review both company workspaces before deployment; the hosted dashboard should consume those reviewed artifacts rather than rerun SEC and market ingestion on every page load.
+
+Pre-deployment release commands:
+
+```bash
+source .venv/bin/activate
+python -m pytest -q
+python src/pipeline.py --config config/company.yaml
+python src/pipeline.py --config config/microsoft.yaml
+python src/portfolio_demo.py
+python -m streamlit run dashboard/app.py -- --config config/company.yaml
+```
+
+For a Microsoft dashboard deployment, set `COMPANY_CONFIG=config/microsoft.yaml`; otherwise the application defaults to Visa. A host must provide Python 3.10+, install `requirements.txt`, make the reviewed `data/companies/<ticker>/` artifacts available through its build or persistent storage (they are intentionally Git-ignored), and start Streamlit with:
+
+```bash
+python -m streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port "$PORT"
+```
+
+Before making the repository public, inspect generated reports and manifests for point-in-time data and local absolute paths. Do not publish `.env`.
+
+## Known limitations and extensions
+
+Current limitations include dependence on live SEC/market services, issuer taxonomy variation, assumption-driven forecasts, imperfect peers, and unavailable historical valuation percentiles without point-in-time market values. See [docs/limitations.md](docs/limitations.md).
+
+Natural extensions are deployment/CI, additional sector adapters and issuers, point-in-time market-data storage, richer segment forecasting, automated release artifacts, and a recruiter-focused walkthrough/interview-defense package.

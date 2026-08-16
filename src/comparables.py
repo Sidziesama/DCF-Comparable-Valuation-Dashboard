@@ -5,7 +5,6 @@ import pandas as pd
 import yfinance as yf
 import yaml
 
-
 # =========================================================
 # PATHS
 # =========================================================
@@ -29,46 +28,8 @@ MULTIPLE_COLUMNS = [
 ]
 
 
-# Multiple eligibility by company.
-#
-# AXP is treated as P/E-only because its lending/balance-sheet
-# structure makes enterprise-value multiples less comparable
-# to Visa's asset-light payment-network model.
-
-MULTIPLE_ELIGIBILITY = {
-
-    "MA": {
-        "ev_revenue",
-        "ev_ebitda",
-        "ev_ebit",
-        "pe",
-    },
-
-    "PYPL": {
-        "ev_revenue",
-        "ev_ebitda",
-        "ev_ebit",
-        "pe",
-    },
-
-    "FISV": {
-        "ev_revenue",
-        "ev_ebitda",
-        "ev_ebit",
-        "pe",
-    },
-
-    "GPN": {
-        "ev_revenue",
-        "ev_ebitda",
-        "ev_ebit",
-        "pe",
-    },
-
-    "AXP": {
-        "pe",
-    },
-}
+# Company-specific multiple eligibility is isolated in the payment-network
+# adapter. Unknown peers default to all standard multiples in core functions.
 
 
 # =========================================================
@@ -565,6 +526,7 @@ def build_comparable_table(
 
 def apply_multiple_eligibility(
     comps,
+    eligibility=None,
 ):
     """
     Remove multiples that should not be used
@@ -572,15 +534,12 @@ def apply_multiple_eligibility(
     """
 
     output = comps.copy()
+    eligibility = eligibility or {}
 
     for ticker in output.index:
 
-        eligible = (
-            MULTIPLE_ELIGIBILITY.get(
-                ticker,
-                set(),
-            )
-        )
+        configured = eligibility.get(ticker)
+        eligible = set(configured) if configured is not None else set(MULTIPLE_COLUMNS)
 
         for metric in MULTIPLE_COLUMNS:
 
@@ -906,25 +865,21 @@ def build_implied_valuation(
 # DIRECT MASTERCARD IMPLIED VALUATION
 # =========================================================
 
-def build_mastercard_implied_valuation(
+def build_direct_peer_implied_valuation(
     comps,
     visa_metrics,
     cash,
     debt,
     shares_outstanding,
+    peer_ticker="MA",
 ):
-    """
-    Apply Mastercard's actual trading multiples directly
-    to Visa as the closest economic comparable.
-    """
+    """Apply one configured peer's trading multiples to the target company."""
 
-    if "MA" not in comps.index:
+    if peer_ticker not in comps.index:
 
         return pd.DataFrame()
 
-    ma = comps.loc[
-        "MA"
-    ]
+    peer = comps.loc[peer_ticker]
 
     mapping = {
 
@@ -947,7 +902,7 @@ def build_mastercard_implied_valuation(
         mapping.items()
     ):
 
-        multiple = ma.get(
+        multiple = peer.get(
             multiple_type,
             np.nan,
         )
@@ -1003,6 +958,13 @@ def build_mastercard_implied_valuation(
 
     return pd.DataFrame(
         rows
+    )
+
+
+def build_mastercard_implied_valuation(comps, visa_metrics, cash, debt, shares_outstanding):
+    """Backward-compatible Visa/MA adapter wrapper."""
+    return build_direct_peer_implied_valuation(
+        comps, visa_metrics, cash, debt, shares_outstanding, peer_ticker="MA"
     )
 
 def get_balance_sheet_value(

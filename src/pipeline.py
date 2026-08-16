@@ -1,9 +1,18 @@
 from pathlib import Path
 import os
+import argparse
+import copy
+from dataclasses import asdict
 
 import pandas as pd
-import yaml
 from dotenv import load_dotenv
+
+from company_config import (
+    DEFAULT_CONFIG_PATH,
+    CompanyWorkspace,
+    load_company_config,
+    utc_timestamp,
+)
 
 
 # =========================================================
@@ -87,7 +96,23 @@ from valuation import (
     value_scenarios,
     build_sensitivity_table,
     build_reverse_dcf_summary,
+    build_expectation_matrix,
 )
+
+from investment_intelligence import (
+    build_business_quality_metrics,
+    combine_investment_intelligence,
+)
+from historical_valuation import build_historical_valuation_intelligence
+from adapters import get_adapter
+from operating_intelligence import (
+    build_adapter_health,
+    build_investment_diagnostics,
+    build_scenario_decomposition,
+    build_valuation_attribution,
+)
+from research_product import build_research_product
+from reporting import generate_report_artifacts
 
 from excel_export import export_valuation_workbook
 
@@ -110,14 +135,9 @@ ROOT = (
 # CONFIG
 # =========================================================
 
-def load_config():
-
-    with open(
-        ROOT / "config" / "company.yaml",
-        "r",
-    ) as f:
-
-        return yaml.safe_load(f)
+def load_config(path=DEFAULT_CONFIG_PATH):
+    """Compatibility wrapper around the validated configuration loader."""
+    return load_company_config(path)
 
 
 # =========================================================
@@ -141,7 +161,7 @@ def section(title):
 # PIPELINE
 # =========================================================
 
-def run():
+def run(config_path=DEFAULT_CONFIG_PATH):
 
     # -----------------------------------------------------
     # 1. Environment + config
@@ -151,18 +171,13 @@ def run():
         ROOT / ".env"
     )
 
-    cfg = load_config()
-
-    processed = (
-        ROOT
-        / "data"
-        / "processed"
-    )
-
-    processed.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    cfg = load_config(config_path)
+    workspace = CompanyWorkspace.from_config(cfg, ROOT).ensure()
+    # Keep the historical variable name locally; CompanyWorkspace routes each
+    # artifact into raw/normalized/derived/model/research and falls back to the
+    # former data/processed location when reading pre-migration outputs.
+    processed = workspace
+    retrieved_at = utc_timestamp()
 
     ticker = cfg["ticker"]
 
@@ -188,8 +203,17 @@ def run():
     )
 
     raw = build_raw_dataset(
-        cfg["cik"]
+        cfg["cik"],
+        taxonomy_aliases=(cfg.get("taxonomy", {}) or {}).get("aliases", {}),
     )
+
+    raw["source_system"] = raw.get("source", "companyfacts")
+    raw["source_url"] = (
+        "https://data.sec.gov/api/xbrl/companyfacts/"
+        f"CIK{cfg['cik']}.json"
+    )
+    raw["retrieved_at"] = retrieved_at
+    raw["company_ticker"] = ticker
 
     annual = build_annual_dataset(
         raw,
@@ -247,6 +271,7 @@ def run():
                 user_agent=os.getenv(
                     "SEC_USER_AGENT"
                 ),
+                taxonomy_aliases=(cfg.get("taxonomy", {}) or {}).get("aliases", {}),
             )
         )
 
@@ -277,6 +302,10 @@ def run():
             "frame",
             "xbrl_tag",
             "source",
+            "source_system",
+            "source_url",
+            "retrieved_at",
+            "company_ticker",
         ]
 
         for column in common_columns:
@@ -296,6 +325,13 @@ def run():
             ],
             ignore_index=True,
         )
+
+        raw["source_system"] = raw["source"]
+        raw["source_url"] = raw["source_url"].fillna(
+            "https://www.sec.gov/Archives/edgar/data/"
+        )
+        raw["retrieved_at"] = raw["retrieved_at"].fillna(retrieved_at)
+        raw["company_ticker"] = raw["company_ticker"].fillna(ticker)
 
         # ---------------------------------------------
         # Rebuild quarterly dataset
@@ -360,6 +396,12 @@ def run():
         index=False,
     )
 
+    for frame in (annual, quarterly):
+        frame["retrieved_at"] = retrieved_at
+        frame["company_ticker"] = ticker
+        if "source_system" not in frame.columns:
+            frame["source_system"] = frame.get("source", "companyfacts")
+
     annual.to_csv(
         processed
         / "financials_annual.csv",
@@ -381,13 +423,12 @@ def run():
         "4. HISTORICAL MODEL"
     )
 
-    annual_wide = (
-        build_annual_wide(
-            annual,
-            start_year=2021,
-            end_year=2025,
-        )
-    )
+    annual_years = pd.to_numeric(annual["fy"], errors="coerce").dropna()
+    if annual_years.empty:
+        raise RuntimeError("No annual fiscal years available after SEC normalization.")
+    end_year = int(annual_years.max())
+    start_year = end_year - int(cfg["historical_years"]) + 1
+    annual_wide = build_annual_wide(annual, start_year=start_year, end_year=end_year)
 
     historical = append_ltm(
         annual_wide,
@@ -526,10 +567,42 @@ def run():
         "6. FORECAST SCENARIOS"
     )
 
+    # The adapter is optional: disclosed operating KPIs and sector economics
+    # enrich the model, but can never make the generic valuation pipeline fail.
+    adapter_name = cfg.get("adapter", "generic")
+    adapter_error = ""
+    forecast_metadata = {}
+    operating_kpis = pd.DataFrame()
+    model_assumptions = copy.deepcopy(assumptions)
+    try:
+        adapter = get_adapter(adapter_name)
+        disclosed = adapter.normalize_kpis(cfg.get("operating_kpis", []))
+        if not disclosed.empty:
+            disclosed["company_ticker"] = ticker
+            disclosed["retrieved_at"] = disclosed["retrieved_at"].replace("", retrieved_at).fillna(retrieved_at)
+        derived = adapter.derive_metrics(disclosed)
+        operating_kpis = pd.concat([disclosed, derived], ignore_index=True)
+        years = int(assumptions.get("forecast_years", cfg.get("forecast_years", 5)))
+        for scenario, scenario_cfg in model_assumptions["scenarios"].items():
+            growth, metadata = adapter.forecast_growth(scenario, scenario_cfg, years)
+            scenario_cfg["revenue_growth"] = growth
+            forecast_metadata[scenario] = metadata
+    except Exception as exc:
+        adapter_error = f"{type(exc).__name__}: {exc}"
+        adapter = get_adapter("generic")
+        operating_kpis = adapter.normalize_kpis(None)
+        for scenario, scenario_cfg in model_assumptions["scenarios"].items():
+            growth, metadata = adapter.forecast_growth(scenario, scenario_cfg, len(scenario_cfg["revenue_growth"]))
+            scenario_cfg["revenue_growth"] = growth
+            metadata["fallback_reason"] = f"Adapter failed; generic fallback used. {adapter_error}"
+            forecast_metadata[scenario] = metadata
+    operating_kpis.to_csv(processed / "operating_kpis.csv", index=False)
+
     operating_forecasts = (
         build_all_scenarios(
             historical,
-            assumptions,
+            model_assumptions,
+            start_year=int(assumptions.get("forecast_start_year", end_year + 2)),
         )
     )
 
@@ -541,11 +614,17 @@ def run():
         operating_forecasts.items()
     ):
 
+        # Scenario-specific financing/capital-allocation drivers may override
+        # generic defaults without leaking industry logic into the engine.
+        linked_assumptions = dict(three_statement_assumptions)
+        linked_assumptions.update(
+            model_assumptions.get("scenarios", {}).get(scenario, {}).get("three_statement", {})
+        )
         statements = build_three_statement_forecast(
             historical=historical,
             latest_balance=latest_balance,
             operating_forecast=operating_forecast,
-            assumptions=three_statement_assumptions,
+            assumptions=linked_assumptions,
         )
         all_statements[scenario] = statements
 
@@ -562,6 +641,11 @@ def run():
             "balance_sheet",
             "cash_flow_statement",
             "fcff_forecast",
+            "working_capital_schedule",
+            "ppe_schedule",
+            "debt_schedule",
+            "equity_schedule",
+            "capital_returns_schedule",
             "checks",
         ]:
             statements[statement_name].to_csv(
@@ -679,7 +763,7 @@ def run():
 
     beta_result = calculate_beta(
         ticker=ticker,
-        benchmark="SPY",
+        benchmark=(cfg.get("market", {}) or {}).get("benchmark", "SPY"),
         period="5y",
     )
 
@@ -854,6 +938,18 @@ def run():
         / "scenario_valuation.csv"
     )
 
+    decomposition_assumptions = copy.deepcopy(model_assumptions)
+    decomposition_assumptions["resolved_wacc"] = wacc
+    scenario_decomposition = build_scenario_decomposition(
+        forecasts, scenario_values, decomposition_assumptions, current_price, forecast_metadata,
+        config_lineage=str(Path(cfg["_config_path"]).relative_to(ROOT)),
+    )
+    scenario_decomposition.to_csv(processed / "scenario_decomposition.csv", index=False)
+    valuation_attribution = build_valuation_attribution(
+        forecasts, model_assumptions, wacc, terminal_growth, cash, debt, shares_outstanding,
+    )
+    valuation_attribution.to_csv(processed / "valuation_attribution.csv", index=False)
+
     check_detail, check_summary = build_model_checks(
         all_statements,
         wacc=wacc,
@@ -942,6 +1038,97 @@ def run():
     reverse_dcf.to_csv(processed / "reverse_dcf.csv")
     reverse_comparison.to_csv(processed / "reverse_dcf_comparison.csv", index=False)
 
+    investment_diagnostics = build_investment_diagnostics(
+        scenario_decomposition, valuation_attribution, reverse_dcf,
+        historical, forecasts, current_price,
+    )
+    investment_diagnostics.to_csv(processed / "investment_diagnostics.csv", index=False)
+
+    expectation_matrix = build_expectation_matrix(
+        base_revenue=float(historical.loc["LTM", "revenue"]),
+        reference_forecast=forecasts["base"],
+        growth_values=[0.06, 0.08, 0.10, 0.12, 0.14],
+        margin_values=[0.58, 0.60, 0.62, 0.64, 0.66],
+        wacc=wacc, terminal_growth=terminal_growth, cash=cash, debt=debt,
+        shares_outstanding=shares_outstanding, current_price=current_price,
+    )
+    expectation_matrix.to_csv(processed / "expectation_matrix.csv", index=False)
+
+    business_quality = build_business_quality_metrics(
+        historical, forecasts, latest_balance, all_statements,
+    )
+    business_quality.to_csv(processed / "business_quality_metrics.csv", index=False)
+
+    peer_path = processed / "trading_comparables.csv"
+    peer_multiples = pd.read_csv(peer_path) if peer_path.exists() else None
+    enterprise_value = market.get("enterprise_value")
+    if enterprise_value is None:
+        enterprise_value = market_cap + debt - cash
+    else:
+        enterprise_value = float(enterprise_value) / 1_000_000
+    valuation_intelligence, historical_valuation_summary = (
+        build_historical_valuation_intelligence(
+            historical, current_market_cap=market_cap,
+            current_enterprise_value=enterprise_value,
+            market_history=None, peer_multiples=peer_multiples,
+        )
+    )
+    historical_valuation_summary.to_csv(
+        processed / "historical_valuation_summary.csv", index=False,
+    )
+
+    reverse_rows = []
+    for mode, result in reverse_dcf.iterrows():
+        reverse_rows.append({
+            "category": "expectations", "metric": f"Market-implied {mode.replace('_', ' ')}",
+            "scope": "market", "scenario": "market_implied", "period": "Forecast",
+            "value": result.get("implied_assumption"), "units": "ratio",
+            "source": "reverse DCF", "lineage": "derived/reverse_dcf.csv",
+            "status": result.get("status", "converged" if result.get("converged") else "failed"),
+            "quality": "solver_output" if result.get("converged") else "solver_failure",
+            "interpretation": result.get("failure_reason", ""),
+        })
+    investment_intelligence = combine_investment_intelligence(
+        business_quality, valuation_intelligence, pd.DataFrame(reverse_rows),
+    )
+    investment_intelligence.to_csv(processed / "investment_intelligence.csv", index=False)
+
+    intelligence_health = pd.DataFrame([
+        {"category": "Business quality", "status": "PASS" if not business_quality.empty else "N/A",
+         "available": int(business_quality["value"].notna().sum()), "unavailable": int(business_quality["value"].isna().sum()),
+         "detail": "Unavailable metrics are retained with lineage and quality flags."},
+        {"category": "Reverse DCF", "status": "PASS" if reverse_dcf["converged"].any() else "WARN",
+         "available": int(reverse_dcf["converged"].sum()), "unavailable": int((~reverse_dcf["converged"]).sum()),
+         "detail": "Solver failures are non-fatal and carry explicit reasons."},
+        {"category": "Historical valuation", "status": "PASS" if historical_valuation_summary["history_status"].eq("available").any() else "N/A",
+         "available": int(historical_valuation_summary["history_status"].eq("available").sum()),
+         "unavailable": int(historical_valuation_summary["history_status"].ne("available").sum()),
+         "detail": "Historical market values are unavailable; current/LTM and peer comparisons remain available."},
+    ])
+    intelligence_health = pd.concat([
+        intelligence_health,
+        build_adapter_health(adapter_name, operating_kpis, forecast_metadata, adapter_error),
+    ], ignore_index=True)
+    intelligence_health.to_csv(processed / "investment_intelligence_health.csv", index=False)
+
+    # Structured research product. Core valuation has already completed; any
+    # failure is explicit and does not silently alter the model or its rating.
+    try:
+        research_product = build_research_product(
+            cfg, workspace, current_price=current_price, scenario_values=scenario_values,
+            operating_kpis=operating_kpis, scenario_decomposition=scenario_decomposition,
+            valuation_attribution=valuation_attribution, reverse_dcf=reverse_dcf,
+            diagnostics=investment_diagnostics, business_quality=business_quality,
+            model_health=check_summary,
+        )
+        recommendation = research_product["recommendation"]
+        print(f"Deterministic recommendation: {recommendation['rating']}")
+    except Exception as exc:
+        raise RuntimeError(f"Research product generation failed explicitly: {type(exc).__name__}: {exc}") from exc
+
+    # Refresh consolidated valuation before Excel/report generation so every
+    # presentation artifact belongs to this run, never a stale prior workspace.
+    build_valuation_summary(config_path=config_path)
     optional_outputs = {}
     for key, filename in {
         "trading_comps": "trading_comparables.csv",
@@ -965,14 +1152,37 @@ def run():
     print(reverse_dcf.round(4).to_string())
     print(f"Excel model: {workbook_path}")
 
+    reporting_cfg = cfg.get("reporting", {}) or {}
+    if reporting_cfg.get("enabled", True):
+        try:
+            report_result = generate_report_artifacts(
+                workspace, memo=asdict(research_product["memo"]),
+                claims=[asdict(x) for x in research_product["claims"]],
+                evidence=[asdict(x) for x in research_product["evidence"]],
+                recommendation=recommendation, config=cfg,
+                artifacts={"generated_at": utc_timestamp(), "valuation_tables": {
+                    "DCF scenarios": scenario_values.reset_index().to_dict("records"),
+                    "Reverse DCF": reverse_dcf.reset_index().to_dict("records"),
+                    "Football field": optional_outputs["football_field"].reset_index().to_dict("records") if optional_outputs["football_field"] is not None else [],
+                }},
+            )
+            print(f"Investment report: {report_result['html']}")
+            if report_result["pdf"]:
+                print(f"PDF report: {report_result['pdf']}")
+        except Exception as exc:
+            message = f"Report generation warning: {type(exc).__name__}: {exc}"
+            print(message)
+            pd.DataFrame([{"check": "report_generation", "status": "FAIL", "count": 1,
+                           "detail": message}]).to_csv(workspace.root / "research" / "report_health.csv", index=False)
+            if reporting_cfg.get("required", False):
+                raise RuntimeError(message) from exc
+
 
     # =====================================================
     # 15. FINAL SUMMARY
     # =====================================================
 
-    section(
-        "12. DCF SUMMARY"
-    )
+    section("13. DCF SUMMARY")
 
     print(
         f"Current Price:       "
@@ -1021,19 +1231,52 @@ def run():
         "\nPipeline completed successfully."
     )
 
-    print(
-        f"Outputs saved to:\n"
-        f"{processed}"
+    artifacts = []
+    for path in sorted(workspace.root.rglob("*")):
+        if path.is_file() and path.name != "lineage_manifest.json":
+            relative = str(path.relative_to(workspace.root))
+            derived_from = [] if relative.startswith("raw/") else ["raw/sec_raw.csv"]
+            artifacts.append({"path": relative, "derived_from": derived_from})
+    manifest_path = workspace.write_manifest(
+        artifacts=artifacts,
+        sources=[
+            {
+                "name": "SEC CompanyFacts / filing XBRL",
+                "url": "https://data.sec.gov/",
+                "retrieved_at": retrieved_at,
+            },
+            {
+                "name": cfg.get("sources", {}).get("market", {}).get("provider", "yfinance"),
+                "retrieved_at": retrieved_at,
+            },
+        ],
+        retrieved_at=retrieved_at,
     )
 
+    print(
+        f"Outputs saved to:\n"
+        f"{workspace.root}"
+    )
+    print(f"Artifact manifest:\n{manifest_path}")
+    return {
+        "ticker": ticker,
+        "company_name": cfg["company_name"],
+        "workspace": workspace.root,
+        "manifest": manifest_path,
+        "workbook": workbook_path,
+        "report_html": workspace.path(f"{ticker.lower()}_investment_report.html"),
+        "report_pdf": workspace.path(f"{ticker.lower()}_investment_report.pdf"),
+    }
 
-def run_consolidated_valuation():
-    """Build and print the consolidated valuation after the core pipeline."""
-    section("13. CONSOLIDATED VALUATION")
-    valuation_results = build_valuation_summary()
-    consolidated = valuation_results["consolidated"]
-    football_field = valuation_results["football_field"]
-    central_range = valuation_results["central_range"]
+
+def run_consolidated_valuation(config_path=DEFAULT_CONFIG_PATH):
+    """Print the consolidated artifacts already refreshed by the core run."""
+    section("14. CONSOLIDATED VALUATION")
+    config = load_config(config_path)
+    workspace = CompanyWorkspace.from_config(config, ROOT).ensure()
+    consolidated = pd.read_csv(workspace / "valuation_summary.csv")
+    football_field = pd.read_csv(workspace / "football_field.csv")
+    central_range = pd.read_csv(workspace / "central_valuation_range.csv").iloc[0].to_dict()
 
     print("\nCONSOLIDATED VALUATION")
     print(consolidated.round(4).to_string(index=False))
@@ -1041,7 +1284,31 @@ def run_consolidated_valuation():
     print(football_field.round(2).to_string(index=False))
     print("\nCENTRAL VALUATION RANGE")
     for key, value in central_range.items():
-        print(f"{key:20s}: ${value:,.2f}")
+        display = f"{int(value)}" if key == "method_count" else f"${value:,.2f}"
+        print(f"{key:20s}: {display}")
+    return workspace.refresh_manifest_artifacts()
+
+
+def main(argv=None):
+    """CLI entry point kept separate so config selection is easy to test."""
+    parser = argparse.ArgumentParser(description="Run a company valuation research pipeline.")
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Path to a validated company YAML config (default: config/company.yaml).",
+    )
+    args = parser.parse_args(argv)
+    summary = run(args.config)
+    manifest = run_consolidated_valuation(args.config) or summary["manifest"]
+    section("RUN COMPLETE")
+    print(f"Company:           {summary['company_name']} ({summary['ticker']})")
+    print(f"Workspace:         {summary['workspace']}")
+    print(f"Artifact manifest: {manifest}")
+    print(f"Excel model:       {summary['workbook']}")
+    print(f"HTML report:       {summary['report_html']}")
+    if summary["report_pdf"].exists():
+        print(f"PDF report:        {summary['report_pdf']}")
+    return summary
 
 
 # =========================================================
@@ -1049,5 +1316,4 @@ def run_consolidated_valuation():
 # =========================================================
 
 if __name__ == "__main__":
-    run()
-    run_consolidated_valuation()
+    main()

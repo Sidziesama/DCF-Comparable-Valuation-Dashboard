@@ -1,15 +1,17 @@
 from pathlib import Path
 import sys
+import os
+import json
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from valuation import run_dcf, run_exit_multiple_dcf
+from company_config import DEFAULT_CONFIG_PATH, CompanyWorkspace, load_company_config
 
 
 # =========================================================
@@ -22,17 +24,28 @@ ROOT = (
     .parents[1]
 )
 
-DATA = (
-    ROOT
-    / "data"
-    / "processed"
-)
+def _config_argument():
+    """Support COMPANY_CONFIG or `streamlit run ... -- --config path`."""
+    if os.getenv("COMPANY_CONFIG"):
+        return Path(os.environ["COMPANY_CONFIG"])
+    if "--config" in sys.argv:
+        position = sys.argv.index("--config")
+        if position + 1 < len(sys.argv):
+            return Path(sys.argv[position + 1])
+    return DEFAULT_CONFIG_PATH
 
-CONFIG_PATH = (
-    ROOT
-    / "config"
-    / "company.yaml"
-)
+
+CONFIG_PATH = _config_argument()
+
+
+@st.cache_data
+def load_config(path):
+    return load_company_config(path)
+
+
+config = load_config(str(CONFIG_PATH))
+WORKSPACE = CompanyWorkspace.from_config(config, ROOT).ensure()
+DATA = WORKSPACE
 
 
 # =========================================================
@@ -40,7 +53,7 @@ CONFIG_PATH = (
 # =========================================================
 
 st.set_page_config(
-    page_title="Visa Valuation Dashboard",
+    page_title=f"{config['company_name']} Valuation Dashboard",
     page_icon="📊",
     layout="wide",
 )
@@ -49,20 +62,6 @@ st.set_page_config(
 # =========================================================
 # LOAD CONFIG
 # =========================================================
-
-@st.cache_data
-def load_config():
-
-    with open(
-        CONFIG_PATH,
-        "r",
-    ) as f:
-
-        return yaml.safe_load(f)
-
-
-config = load_config()
-
 
 # =========================================================
 # DATA HELPERS
@@ -74,15 +73,14 @@ def load_csv(
 ):
 
     path = (
-        DATA
-        / filename
+        DATA.path(filename, for_read=True)
     )
 
     if not path.exists():
 
         st.error(
             f"Missing file: {filename}. "
-            "Run `python src/pipeline.py` first."
+            "Run `python src/pipeline.py --config <path>` first."
         )
 
         st.stop()
@@ -91,6 +89,13 @@ def load_csv(
         path,
         index_col=index_col,
     )
+
+
+def load_json(filename, default=None):
+    path = DATA.path(filename, for_read=True)
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 # =========================================================
@@ -130,9 +135,9 @@ def load_data():
         index_col=0,
     )
 
-    mastercard = load_csv(
-        "valuation_mastercard_comps.csv",
-    )
+    mastercard = load_csv("valuation_direct_peer_comps.csv")
+    if mastercard.empty:
+        mastercard = load_csv("valuation_mastercard_comps.csv")
 
     football_field = load_csv(
         "football_field.csv",
@@ -175,6 +180,13 @@ def load_data():
     forecast_reasonableness = load_csv("forecast_reasonableness.csv")
     reverse_dcf = load_csv("reverse_dcf.csv", index_col=0)
     reverse_comparison = load_csv("reverse_dcf_comparison.csv")
+    memo = load_json("investment_memo.json", {})
+    recommendation = load_json("recommendation.json", {})
+    claims = load_json("research_claims.json", [])
+    evidence = load_json("evidence_store.json", [])
+    monitoring = load_json("thesis_monitoring.json", [])
+    report_health_path = DATA.path("report_health.csv", for_read=True)
+    report_health = pd.read_csv(report_health_path) if report_health_path.exists() else pd.DataFrame()
 
     three_statements = {}
     for scenario in ("bear", "base", "bull"):
@@ -209,6 +221,8 @@ def load_data():
         "forecast_reasonableness": forecast_reasonableness,
         "reverse_dcf": reverse_dcf,
         "reverse_comparison": reverse_comparison,
+        "memo": memo, "recommendation": recommendation, "claims": claims,
+        "evidence": evidence, "monitoring": monitoring, "report_health": report_health,
     }
 
 
@@ -345,7 +359,7 @@ c1.metric(
 )
 
 c2.metric(
-    "Central Valuation",
+    "Primary-Method Central Value",
     money(
         central_value,
         2,
@@ -402,6 +416,7 @@ tabs = st.tabs(
         "Three Statements",
         "Model Health & Analytics",
         "Reverse DCF",
+        "Research V3",
     ]
 )
 
@@ -414,6 +429,82 @@ interactive_tab = tabs[5]
 statements_tab = tabs[6]
 health_tab = tabs[7]
 reverse_tab = tabs[8]
+research_tab = tabs[9]
+
+
+with research_tab:
+    st.subheader("Research Dashboard V3")
+    st.caption("Structured research views; analytical and recommendation logic remain in the pipeline.")
+    rec = data["recommendation"]
+    memo = data["memo"]
+    components = rec.get("components", {})
+    rcols = st.columns(5)
+    rcols[0].metric("Recommendation", rec.get("rating", "N/A"))
+    rcols[1].metric("Base fair value", money(memo.get("fair_value_base_case"), 2))
+    rcols[2].metric("Expected return", percentage(memo.get("expected_return")))
+    rcols[3].metric("Evidence coverage", percentage(components.get("evidence_coverage")))
+    rcols[4].metric("Thesis confidence", percentage(components.get("thesis_confidence")))
+    st.markdown("#### Recommendation rationale")
+    for reason in rec.get("rationale", []):
+        st.write(f"- {reason}")
+
+    claims = pd.DataFrame(data["claims"])
+    if not claims.empty:
+        for label, kind in (("Investment thesis", "thesis"), ("Risks", "risk"), ("Thesis breakers", "thesis_breaker")):
+            st.markdown(f"#### {label}")
+            subset = claims[claims["claim_type"].eq(kind)]
+            if subset.empty:
+                st.info(f"No structured {label.lower()} available.")
+            for _, claim in subset.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**{claim['title']}**")
+                    st.write(claim["statement"])
+                    st.caption(f"{str(claim.get('basis','')).replace('_',' ').title()} | {str(claim.get('confidence','')).title()} confidence")
+
+    st.markdown("#### Thesis monitoring")
+    monitoring = pd.DataFrame(data["monitoring"])
+    if monitoring.empty:
+        st.info("No monitored conditions are currently configured.")
+    else:
+        status_counts = monitoring["status"].value_counts()
+        mcols = st.columns(4)
+        for col, status in zip(mcols, ("SAFE", "WATCH", "BREACHED", "UNKNOWN")):
+            col.metric(status.title(), int(status_counts.get(status, 0)))
+        st.dataframe(monitoring, use_container_width=True, hide_index=True)
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### Evidence and report health")
+        if data["report_health"].empty:
+            st.warning("Report health has not been generated.")
+        else:
+            st.dataframe(data["report_health"], use_container_width=True, hide_index=True)
+    with right:
+        st.markdown("#### Market expectations vs base case")
+        reverse = data["reverse_comparison"].copy()
+        if not reverse.empty:
+            fig = px.bar(reverse, x="scenario", y="implied_share_price", color="case_type")
+            fig.add_hline(y=current_price, line_dash="dash", annotation_text="Current price")
+            st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### KPI coverage and sources")
+    evidence = pd.DataFrame(data["evidence"])
+    if not evidence.empty:
+        available = evidence[evidence["status"].astype(str).str.lower().isin(["available", "converged", "pass"])]
+        st.caption(f"{len(available)} of {len(evidence)} evidence records are available. Source URLs are shown when supplied.")
+        columns = [x for x in ("evidence_type", "metric", "value", "unit", "period", "source", "source_url", "quality") if x in evidence]
+        st.dataframe(evidence[columns], use_container_width=True, hide_index=True, column_config={"source_url": st.column_config.LinkColumn("Source")})
+
+    st.markdown("#### Report downloads")
+    downloads = st.columns(3)
+    for col, filename, label, mime in (
+        (downloads[0], f"{config['ticker'].lower()}_investment_report.html", "Download HTML report", "text/html"),
+        (downloads[1], f"{config['ticker'].lower()}_investment_report.pdf", "Download PDF report", "application/pdf"),
+        (downloads[2], f"{config['ticker'].lower()}_valuation_model.xlsx", "Download Excel model", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    ):
+        path = (WORKSPACE.root / "research" / filename) if filename.endswith((".html", ".pdf")) else (DATA / filename)
+        if path.exists():
+            col.download_button(label, data=path.read_bytes(), file_name=path.name, mime=mime)
 
 
 # =========================================================
@@ -1241,7 +1332,7 @@ with valuation_tab:
 
     fig.update_layout(
         title=(
-            "Visa Implied Valuation Range"
+            f"{config['company_name']} Implied Valuation Range"
         ),
         xaxis_title=(
             "Implied Share Price ($)"
@@ -1261,7 +1352,7 @@ with valuation_tab:
     # -----------------------------------------------------
 
     st.subheader(
-        "Central Valuation"
+        "Primary-Method Central Valuation"
     )
 
     c1, c2, c3, c4 = (
@@ -1299,7 +1390,7 @@ with valuation_tab:
     )
 
     c4.metric(
-        "Mean Base",
+        "Primary Mean Base",
         money(
             central_range[
                 "mean_base"

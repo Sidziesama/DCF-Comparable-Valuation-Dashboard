@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-16T01:23:51.997858+00:00",
+  "source_policy": "existing generated artifacts only",
+  "companies": [
+    {
+      "ticker": "V",
+      "company_name": "Visa Inc.",
+      "adapter": "payment_network",
+      "recommendation": "HOLD",
+      "recommendation_horizon": "12-24 months",
+      "current_price": 364.1499938964844,
+      "scenarios": {
+        "bear": {
+          "implied_share_price": 304.55402231539955,
+          "upside_downside": -0.1636577580117328
+        },
+        "base": {
+          "implied_share_price": 370.63407705665145,
+          "upside_downside": 0.0178060779042887
+        },
+        "bull": {
+          "implied_share_price": 413.9787565988416,
+          "upside_downside": 0.1368358191337
+        }
+      },
+      "model_health": "PASS",
+      "research_health": "PASS",
+      "adapter_health": "PASS",
+      "kpi_coverage": {
+        "available": 14,
+        "total": 14,
+        "metrics": [
+          "client_incentives",
+          "client_incentives_growth",
+          "cross_border_volume_growth",
+          "payments_volume",
+          "payments_volume_growth",
+          "processed_transactions",
+          "processed_transactions_growth"
+        ]
+      },
+      "thesis_monitoring": {
+        "SAFE": 1,
+        "WATCH": 1
+      },
+      "investment_intelligence": {
+        "available_rows": 238,
+        "total_rows": 284,
+        "categories": [
+          "business_quality",
+          "expectations",
+          "historical_valuation"
+        ]
+      },
+      "reports": {
+        "html": "data/companies/v/research/v_investment_report.html",
+        "pdf": "data/companies/v/research/v_investment_report.pdf",
+        "excel": "data/companies/v/model/v_valuation_model.xlsx"
+      },
+      "artifact_manifest": "data/companies/v/research/lineage_manifest.json"
+    },
+    {
+      "ticker": "MSFT",
+      "company_name": "Microsoft Corporation",
+      "adapter": "software",
+      "recommendation": "HOLD",
+      "recommendation_horizon": "12-24 months",
+      "current_price": 495.3999938964844,
+      "scenarios": {
+        "bear": {
+          "implied_share_price": 338.36228708059065,
+          "upside_downside": -0.3169917415233302
+        },
+        "base": {
+          "implied_share_price": 470.89204710318785,
+          "upside_downside": -0.0494710276448198
+        },
+        "bull": {
+          "implied_share_price": 604.1738776913982,
+          "upside_downside": 0.2195677939746654
+        }
+      },
+      "model_health": "PASS",
+      "research_health": "PASS",
+      "adapter_health": "PASS",
+      "kpi_coverage": {
+        "available": 24,
+        "total": 24,
+        "metrics": [
+          "azure_growth",
+          "intelligent_cloud_revenue",
+          "intelligent_cloud_revenue_growth",
+          "microsoft_365_commercial_cloud_growth",
+          "microsoft_365_consumer_subscribers",
+          "microsoft_cloud_gross_margin",
+          "microsoft_cloud_revenue",
+          "microsoft_cloud_revenue_growth",
+          "more_personal_computing_revenue",
+          "more_personal_computing_revenue_growth",
+          "productivity_business_processes_revenue",
+          "productivity_business_processes_revenue_growth"
+        ]
+      },
+      "thesis_monitoring": {
+        "SAFE": 3
+      },
+      "investment_intelligence": {
+        "available_rows": 235,
+        "total_rows": 284,
+        "categories": [
+          "business_quality",
+          "expectations",
+          "historical_valuation"
+        ]
+      },
+      "reports": {
+        "html": "data/companies/msft/research/msft_investment_report.html",
+        "pdf": "data/companies/msft/research/msft_investment_report.pdf",
+        "excel": "data/companies/msft/model/msft_valuation_model.xlsx"
+      },
+      "artifact_manifest": "data/companies/msft/research/lineage_manifest.json"
+    }
+  ]
+}

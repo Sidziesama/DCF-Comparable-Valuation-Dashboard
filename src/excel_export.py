@@ -181,7 +181,12 @@ def export_valuation_workbook(
     row = 4
     if statements and "base" in statements:
         for label, key in (("Income Statement", "income_statement"), ("Balance Sheet", "balance_sheet"),
-                           ("Cash Flow Statement", "cash_flow_statement"), ("FCFF Bridge", "fcff_forecast")):
+                           ("Cash Flow Statement", "cash_flow_statement"), ("FCFF Bridge", "fcff_forecast"),
+                           ("Working Capital Schedule", "working_capital_schedule"),
+                           ("PP&E / Depreciation Schedule", "ppe_schedule"),
+                           ("Debt / Interest Schedule", "debt_schedule"),
+                           ("Equity / Share Count Schedule", "equity_schedule"),
+                           ("Capital Returns Schedule", "capital_returns_schedule")):
             if key in statements["base"]:
                 row = _section(ws, row, label, 18)
                 row, _ = _write_frame(ws, statements["base"][key], row, 1)
@@ -302,4 +307,3 @@ def validate_exported_workbook(path, expected_sheets=None):
                         formula_errors.append(f"{ws.title}!{cell.coordinate}")
     return {"opens_cleanly": True, "missing_sheets": missing, "formula_count": formulas,
             "formula_reference_errors": formula_errors, "sheet_count": len(wb.sheetnames)}
-

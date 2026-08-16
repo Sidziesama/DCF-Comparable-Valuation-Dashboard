@@ -1,0 +1,28 @@
+# Human-readable contract (JSON Schema is intentionally avoided to keep runtime light).
+schema_version: 1
+required:
+  ticker: non-empty exchange ticker
+  company_name: legal/display name
+  cik: SEC CIK, digits with optional CIK prefix
+pipeline_required:
+  assumptions.scenarios: bear, base, and bull driver mappings
+  assumptions.wacc: risk_free_rate, equity_risk_premium, pre_tax_cost_of_debt
+  assumptions.terminal_growth: decimal long-run growth rate
+optional_defaults:
+  historical_years: 5
+  forecast_years: 5
+  peers: {}
+  adapter: generic
+  storage.root: data/companies
+optional_overrides:
+  sources.sec.user_agent_env: SEC_USER_AGENT
+  sources.market.provider: yfinance
+  taxonomy.aliases: additional company-specific XBRL aliases
+  market.benchmark: return-series benchmark ticker, default SPY
+  peer_methodology.multiple_eligibility: per-peer list of defensible multiples
+  fiscal_calendar.year_end_month/year_end_day: explicit company fiscal year-end metadata
+  assumptions.three_statement: linked-statement drivers
+  recommendation_policy: deterministic BUY/HOLD/SELL/WATCH/NO-RATING thresholds
+  reporting.enabled: generate research report artifacts, default true
+  reporting.required: fail pipeline when report generation fails, default false
+  thesis_monitoring.conditions: explicit metric/operator/threshold monitoring rules

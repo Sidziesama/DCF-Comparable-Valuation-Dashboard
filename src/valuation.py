@@ -267,15 +267,25 @@ def build_reverse_dcf_summary(
         raise ValueError("forecasts must contain a base case.")
     rows = []
     for mode in modes:
-        result = solve_reverse_dcf(
-            base_revenue, forecasts["base"], target_share_price, wacc,
-            terminal_growth, cash, debt, shares_outstanding, mode=mode,
-        )
-        rows.append({key: result[key] for key in (
-            "mode", "implied_assumption", "target_share_price", "implied_share_price",
-            "price_residual", "converged", "iterations", "lower_bound", "upper_bound",
-            "wacc", "terminal_growth",
-        )})
+        try:
+            result = solve_reverse_dcf(
+                base_revenue, forecasts["base"], target_share_price, wacc,
+                terminal_growth, cash, debt, shares_outstanding, mode=mode,
+            )
+            rows.append({key: result[key] for key in (
+                "mode", "implied_assumption", "target_share_price", "implied_share_price",
+                "price_residual", "converged", "iterations", "lower_bound", "upper_bound",
+                "wacc", "terminal_growth",
+            )} | {"status": "converged", "failure_reason": ""})
+        except (ValueError, RuntimeError) as exc:
+            rows.append({
+                "mode": mode, "implied_assumption": np.nan,
+                "target_share_price": target_share_price, "implied_share_price": np.nan,
+                "price_residual": np.nan, "converged": False, "iterations": 0,
+                "lower_bound": np.nan, "upper_bound": np.nan, "wacc": wacc,
+                "terminal_growth": terminal_growth, "status": "failed",
+                "failure_reason": str(exc),
+            })
     implied = pd.DataFrame(rows).set_index("mode")
     comparison = value_scenarios(
         forecasts, wacc, terminal_growth, cash, debt, shares_outstanding
@@ -289,3 +299,40 @@ def build_reverse_dcf_summary(
         "upside_downside": 0.0,
     }])], ignore_index=True)
     return implied, comparison
+
+
+def build_expectation_matrix(
+    base_revenue, reference_forecast, growth_values, margin_values, wacc,
+    terminal_growth, cash, debt, shares_outstanding, *, current_price=None,
+):
+    """Return a long-form growth × operating-margin DCF expectation matrix."""
+    years = len(reference_forecast)
+    if years == 0:
+        raise ValueError("reference_forecast cannot be empty.")
+    start_year = int(reference_forecast.index[0])
+    tax = _forecast_driver(reference_forecast, "tax_rate", 0.21)
+    da = ((reference_forecast["da"] / reference_forecast["revenue"]).astype(float).tolist()
+          if {"da", "revenue"}.issubset(reference_forecast.columns) else [0.0] * years)
+    capex = ((reference_forecast["capex"] / reference_forecast["revenue"]).astype(float).tolist()
+             if {"capex", "revenue"}.issubset(reference_forecast.columns) else [0.0] * years)
+    incremental_revenue = pd.to_numeric(reference_forecast["revenue"], errors="coerce").diff()
+    incremental_revenue.iloc[0] = float(reference_forecast["revenue"].iloc[0]) - base_revenue
+    nwc = (pd.to_numeric(reference_forecast.get("change_nwc", 0.0), errors="coerce") /
+           incremental_revenue.replace(0, np.nan)).fillna(0.0).astype(float).tolist()
+    rows = []
+    for growth in growth_values:
+        for margin in margin_values:
+            forecast = build_forecast_from_inputs(
+                base_revenue, [float(growth)] * years, [float(margin)] * years,
+                tax, da, capex, nwc, scenario="expectation_matrix", start_year=start_year,
+            )
+            price = run_dcf(forecast, wacc, terminal_growth, cash, debt,
+                            shares_outstanding)["implied_share_price"]
+            rows.append({
+                "revenue_growth": float(growth), "operating_margin": float(margin),
+                "implied_share_price": price, "current_price": current_price,
+                "valuation_gap": price - current_price if current_price is not None else np.nan,
+                "upside_downside": price / current_price - 1 if current_price else np.nan,
+                "status": "available",
+            })
+    return pd.DataFrame(rows)

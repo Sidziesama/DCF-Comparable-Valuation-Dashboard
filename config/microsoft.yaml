@@ -1,0 +1,152 @@
+ticker: MSFT
+company_name: Microsoft Corporation
+cik: "0000789019"
+adapter: software
+
+fiscal_calendar:
+  year_end_month: 6
+  year_end_day: 30
+  convention: "Fiscal year is named for the calendar year in which it ends."
+
+storage:
+  root: data/companies
+
+sources:
+  sec:
+    user_agent_env: SEC_USER_AGENT
+  market:
+    provider: yfinance
+
+market:
+  benchmark: QQQ
+
+taxonomy:
+  aliases:
+    stock_based_compensation: [ShareBasedCompensation]
+    short_term_debt: [LongTermDebtAndFinanceLeaseObligationsCurrent, CurrentPortionOfLongTermDebt]
+    long_term_debt: [LongTermDebtAndFinanceLeaseObligationsNoncurrent]
+
+# Reported observations only. Amounts below are USD millions unless otherwise stated.
+# Azure is disclosed as a growth rate, not as standalone revenue; no Azure revenue history is inferred.
+operating_kpis:
+  - {metric: microsoft_cloud_revenue, period: 2023, value: 111600, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm", filing_date: "2025-07-30", mapping: reported_microsoft_cloud_revenue, quality: reported, definition: "Microsoft Cloud includes Microsoft 365 Commercial cloud, Azure and other cloud services, commercial LinkedIn, and Dynamics 365."}
+  - {metric: microsoft_cloud_revenue, period: 2024, value: 137700, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm", filing_date: "2025-07-30", mapping: reported_microsoft_cloud_revenue, quality: reported, definition: "Microsoft Cloud includes Microsoft 365 Commercial cloud, Azure and other cloud services, commercial LinkedIn, and Dynamics 365."}
+  - {metric: microsoft_cloud_revenue, period: 2025, value: 168900, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm", filing_date: "2025-07-30", mapping: reported_microsoft_cloud_revenue, quality: reported, definition: "Microsoft Cloud includes Microsoft 365 Commercial cloud, Azure and other cloud services, commercial LinkedIn, and Dynamics 365."}
+  - {metric: productivity_business_processes_revenue, period: 2023, value: 94151, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "Productivity and Business Processes segment revenue, recast to the FY2025 presentation."}
+  - {metric: productivity_business_processes_revenue, period: 2024, value: 106820, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "Productivity and Business Processes segment revenue, recast to the FY2025 presentation."}
+  - {metric: productivity_business_processes_revenue, period: 2025, value: 120810, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "Productivity and Business Processes segment revenue."}
+  - {metric: intelligent_cloud_revenue, period: 2023, value: 72944, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "Intelligent Cloud segment revenue, recast to the FY2025 presentation."}
+  - {metric: intelligent_cloud_revenue, period: 2024, value: 87464, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "Intelligent Cloud segment revenue, recast to the FY2025 presentation."}
+  - {metric: intelligent_cloud_revenue, period: 2025, value: 106265, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "Intelligent Cloud segment revenue."}
+  - {metric: more_personal_computing_revenue, period: 2023, value: 54820, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "More Personal Computing segment revenue, recast to the FY2025 presentation."}
+  - {metric: more_personal_computing_revenue, period: 2024, value: 50838, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "More Personal Computing segment revenue, recast to the FY2025 presentation."}
+  - {metric: more_personal_computing_revenue, period: 2025, value: 54649, unit: USD millions, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/R105.htm", filing_date: "2025-07-30", mapping: reported_segment_revenue, quality: reported, definition: "More Personal Computing segment revenue."}
+  - {metric: azure_growth, period: 2025, value: 0.34, unit: ratio, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm", filing_date: "2025-07-30", mapping: reported_azure_and_other_cloud_services_growth, quality: reported, definition: "Reported Azure and other cloud services revenue growth; not standalone Azure revenue."}
+  - {metric: microsoft_365_commercial_cloud_growth, period: 2025, value: 0.15, unit: ratio, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm", filing_date: "2025-07-30", mapping: reported_m365_commercial_cloud_growth, quality: reported, definition: "Reported Microsoft 365 Commercial cloud revenue growth."}
+  - {metric: microsoft_cloud_gross_margin, period: 2025, value: 0.69, unit: ratio, period_type: fiscal_year, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm", filing_date: "2025-07-30", mapping: reported_microsoft_cloud_gross_margin, quality: reported, definition: "Reported Microsoft Cloud gross margin percentage."}
+  - {metric: microsoft_365_consumer_subscribers, period: 2025, value: 89.0, unit: millions of subscribers, period_type: fiscal_year_end, source: Microsoft FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/789019/000095017025100235/msft-20250630.htm", filing_date: "2025-07-30", mapping: reported_m365_consumer_subscribers, quality: reported, definition: "Microsoft 365 Consumer subscribers at fiscal year-end."}
+
+historical_years: 5
+forecast_years: 5
+
+peers:
+  enterprise_software:
+    - ORCL
+    - CRM
+    - ADBE
+    - SAP
+  cloud_platform_reference:
+    - GOOGL
+    - AMZN
+
+peer_methodology:
+  rationale: "ORCL, CRM, ADBE, and SAP anchor mature enterprise-software economics. GOOGL and AMZN are cloud-platform references only; conglomerate mix limits direct comparability. No peer is treated as a perfect Microsoft analogue."
+  multiple_eligibility:
+    ORCL: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    CRM: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    ADBE: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    SAP: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    GOOGL: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    AMZN: [ev_revenue, ev_ebitda, ev_ebit, pe]
+
+valuation:
+  direct_peer: ORCL
+
+recommendation_policy:
+  horizon: 12-24 months
+  buy_min_expected_return: 0.15
+  sell_max_expected_return: -0.10
+  hold_min_expected_return: -0.10
+  max_bear_downside_for_buy: -0.25
+  min_evidence_coverage: 0.75
+  watch_evidence_coverage: 0.50
+  min_high_quality_share: 0.50
+  min_thesis_confidence: 0.50
+
+reporting:
+  enabled: true
+  required: true
+
+thesis_monitoring:
+  conditions:
+    - {condition_id: msft_cloud_growth_floor, title: Microsoft Cloud growth remains above the mature-cloud floor, metric: microsoft_cloud_revenue_growth, operator: gte, threshold: 0.15, watch_band: 0.10, unit: ratio}
+    - {condition_id: msft_intelligent_cloud_growth_floor, title: Intelligent Cloud growth remains above the base-risk floor, metric: intelligent_cloud_revenue_growth, operator: gte, threshold: 0.15, watch_band: 0.10, unit: ratio}
+    - {condition_id: msft_cloud_margin_floor, title: Microsoft Cloud gross margin remains resilient through AI infrastructure investment, metric: microsoft_cloud_gross_margin, operator: gte, threshold: 0.65, watch_band: 0.05, unit: ratio}
+
+assumptions:
+  forecast_years: 5
+  forecast_start_year: 2027
+  scenarios:
+    bear:
+      operating_drivers:
+        productivity_business_processes_growth: [0.09, 0.08, 0.07, 0.06, 0.055]
+        intelligent_cloud_growth: [0.14, 0.12, 0.10, 0.09, 0.08]
+        more_personal_computing_growth: [0.01, 0.01, 0.02, 0.02, 0.02]
+        revenue_growth_weights: {productivity_business_processes_growth: 0.4288, intelligent_cloud_growth: 0.3772, more_personal_computing_growth: 0.1940}
+        mix_pricing_overlay: [0.0, 0.0, 0.0, 0.0, 0.0]
+      revenue_growth: [0.092, 0.081, 0.073, 0.066, 0.060]
+      operating_margin: [0.43, 0.425, 0.425, 0.43, 0.435]
+      tax_rate: 0.19
+      da_pct_revenue: 0.125
+      capex_pct_revenue: [0.23, 0.22, 0.205, 0.19, 0.18]
+      delta_nwc_pct_incremental_revenue: -0.05
+      three_statement: {dividends_pct_net_income: 0.30, buybacks_pct_net_income: 0.15}
+    base:
+      operating_drivers:
+        productivity_business_processes_growth: [0.12, 0.11, 0.10, 0.09, 0.08]
+        intelligent_cloud_growth: [0.20, 0.18, 0.16, 0.14, 0.12]
+        more_personal_computing_growth: [0.04, 0.04, 0.04, 0.035, 0.03]
+        revenue_growth_weights: {productivity_business_processes_growth: 0.4288, intelligent_cloud_growth: 0.3772, more_personal_computing_growth: 0.1940}
+        mix_pricing_overlay: [0.005, 0.005, 0.004, 0.003, 0.002]
+      revenue_growth: [0.135, 0.123, 0.111, 0.099, 0.087]
+      operating_margin: [0.455, 0.46, 0.465, 0.47, 0.475]
+      tax_rate: 0.18
+      da_pct_revenue: 0.12
+      capex_pct_revenue: [0.22, 0.205, 0.19, 0.175, 0.16]
+      delta_nwc_pct_incremental_revenue: -0.08
+      three_statement: {dividends_pct_net_income: 0.25, buybacks_pct_net_income: 0.20}
+    bull:
+      operating_drivers:
+        productivity_business_processes_growth: [0.15, 0.14, 0.13, 0.11, 0.10]
+        intelligent_cloud_growth: [0.26, 0.23, 0.20, 0.18, 0.15]
+        more_personal_computing_growth: [0.07, 0.06, 0.055, 0.05, 0.045]
+        revenue_growth_weights: {productivity_business_processes_growth: 0.4288, intelligent_cloud_growth: 0.3772, more_personal_computing_growth: 0.1940}
+        mix_pricing_overlay: [0.01, 0.008, 0.006, 0.005, 0.004]
+      revenue_growth: [0.180, 0.160, 0.143, 0.128, 0.112]
+      operating_margin: [0.47, 0.48, 0.49, 0.50, 0.505]
+      tax_rate: 0.17
+      da_pct_revenue: 0.115
+      capex_pct_revenue: [0.205, 0.185, 0.17, 0.155, 0.145]
+      delta_nwc_pct_incremental_revenue: -0.10
+      three_statement: {dividends_pct_net_income: 0.22, buybacks_pct_net_income: 0.25}
+  three_statement:
+    interest_rate: 0.035
+    debt_issuance: 0.0
+    debt_repayment: 0.0
+  wacc:
+    risk_free_rate: 0.043
+    equity_risk_premium: 0.043
+    beta: 1.0
+    pre_tax_cost_of_debt: 0.035
+  terminal_growth: 0.03
+  terminal_exit_multiple: {bear: 18.0, base: 22.0, bull: 26.0}

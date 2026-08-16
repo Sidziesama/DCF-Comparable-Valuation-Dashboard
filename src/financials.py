@@ -15,6 +15,7 @@ FLOW_METRICS = {
     "dividends",
     "buybacks",
     "depreciation",
+    "amortization",
 }
 
 
@@ -217,7 +218,7 @@ def build_latest_balance_sheet(df):
 def build_ltm(
     annual_df,
     quarterly_df,
-    fiscal_year=2026,
+    fiscal_year=None,
 ):
     """
     Build LTM financials using:
@@ -228,10 +229,8 @@ def build_ltm(
         - Prior-year 9M YTD
         + Current-year 9M YTD
 
-    Example for Visa:
-        FY2025
-        - 9M FY2025
-        + 9M FY2026
+    The latest comparable YTD period and fiscal calendar are inferred from SEC
+    facts, so non-calendar-year companies do not require core-code changes.
     """
 
     annual = annual_df.copy()
@@ -253,7 +252,11 @@ def build_ltm(
     # Prior fiscal year
     # ---------------------------------------------
 
-    prior_year = fiscal_year - 1
+    available_years = annual["fy"].dropna()
+    if available_years.empty:
+        raise ValueError("Cannot build LTM without an annual fiscal year.")
+    prior_year = int(available_years.max())
+    fiscal_year = int(fiscal_year or prior_year + 1)
 
     annual_prior = annual[
         annual["fy"] == prior_year
@@ -272,16 +275,14 @@ def build_ltm(
     )
 
     # ---------------------------------------------
-    # June 30 comparative periods
+    # Latest comparable nine-month periods (fiscal calendar agnostic)
     # ---------------------------------------------
 
-    prior_ytd_end = pd.Timestamp(
-        f"{prior_year}-06-30"
-    )
-
-    current_ytd_end = pd.Timestamp(
-        f"{fiscal_year}-06-30"
-    )
+    nine_month = q[q["period_type"] == "nine_month_ytd"].copy()
+    current_ytd_end = nine_month["end"].max()
+    if pd.isna(current_ytd_end):
+        raise ValueError("Cannot build LTM without a nine-month YTD observation.")
+    prior_ytd_end = current_ytd_end - pd.DateOffset(years=1)
 
     # ---------------------------------------------
     # Select nine-month YTD facts
@@ -387,7 +388,7 @@ def build_ltm(
         results.append(
             {
                 "metric": metric,
-                "fy2025": fy_value,
+                f"fy{prior_year}": fy_value,
                 "prior_9m": prior_value,
                 "current_9m": current_value,
                 "ltm": ltm_value,

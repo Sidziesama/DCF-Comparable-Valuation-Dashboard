@@ -1,6 +1,82 @@
 ticker: V
 company_name: Visa Inc.
 cik: "0001403161"
+adapter: payment_network
+
+# Reported observations only. Forecast driver assumptions live separately below.
+# Visa does not disclose a single comparable absolute cross-border-volume series,
+# so only the specifically defined constant-dollar growth statistic is stored.
+operating_kpis:
+  - {metric: payments_volume, period: 2023, value: 12.088, unit: USD trillions, period_type: fiscal_year, source: Visa FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316125000089/v-20250930.htm", filing_date: "2025-11-12", mapping: total_nominal_payments_volume, quality: reported, definition: "Aggregate purchases on Visa-branded form factors; excludes Europe co-badged volume."}
+  - {metric: payments_volume, period: 2024, value: 12.988, unit: USD trillions, period_type: fiscal_year, source: Visa FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316125000089/v-20250930.htm", filing_date: "2025-11-12", mapping: total_nominal_payments_volume, quality: reported, definition: "Aggregate purchases on Visa-branded form factors; excludes Europe co-badged volume."}
+  - {metric: payments_volume, period: 2025, value: 13.894, unit: USD trillions, period_type: fiscal_year, source: Visa FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316125000089/v-20250930.htm", filing_date: "2025-11-12", mapping: total_nominal_payments_volume, quality: reported, definition: "Aggregate purchases on Visa-branded form factors; excludes Europe co-badged volume."}
+  - {metric: processed_transactions, period: 2023, value: 212.579, unit: billions of transactions, period_type: fiscal_year, source: Visa FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316125000089/v-20250930.htm", filing_date: "2025-11-12", mapping: visa_processed_transactions, quality: reported, definition: "Payments and cash transactions processed on Visa networks."}
+  - {metric: processed_transactions, period: 2024, value: 233.758, unit: billions of transactions, period_type: fiscal_year, source: Visa FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316125000089/v-20250930.htm", filing_date: "2025-11-12", mapping: visa_processed_transactions, quality: reported, definition: "Payments and cash transactions processed on Visa networks."}
+  - {metric: processed_transactions, period: 2025, value: 257.545, unit: billions of transactions, period_type: fiscal_year, source: Visa FY2025 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316125000089/v-20250930.htm", filing_date: "2025-11-12", mapping: visa_processed_transactions, quality: reported, definition: "Payments and cash transactions processed on Visa networks."}
+  - {metric: cross_border_volume_growth, period: 2024, value: 0.15, unit: ratio, period_type: fiscal_year, source: Visa FY2024 earnings release, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316124000053/q42024earningsrelease.htm", filing_date: "2024-10-29", mapping: total_cross_border_volume_constant_dollar_growth, quality: reported, definition: "Constant-dollar total cross-border volume growth; not an absolute volume series."}
+  - {metric: client_incentives, period: 2023, value: 12.297, unit: USD billions, period_type: fiscal_year, source: Visa FY2024 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316124000058/v-20240930.htm", filing_date: "2024-11-13", mapping: client_incentives, quality: reported, definition: "Contra-revenue incentives earned by financial institution clients, merchants, and partners."}
+  - {metric: client_incentives, period: 2024, value: 13.764, unit: USD billions, period_type: fiscal_year, source: Visa FY2024 Form 10-K, source_url: "https://www.sec.gov/Archives/edgar/data/1403161/000140316124000058/v-20240930.htm", filing_date: "2024-11-13", mapping: client_incentives, quality: reported, definition: "Contra-revenue incentives earned by financial institution clients, merchants, and partners."}
+
+# Optional; defaults to data/companies/<ticker>.
+storage:
+  root: data/companies
+
+sources:
+  sec:
+    user_agent_env: SEC_USER_AGENT
+  market:
+    provider: yfinance
+
+valuation:
+  direct_peer: MA
+
+market:
+  benchmark: SPY
+
+peer_methodology:
+  rationale: "Mastercard is the closest global payment-network peer; AXP is P/E-only because lending economics distort enterprise-value comparisons."
+  multiple_eligibility:
+    MA: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    PYPL: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    FISV: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    GPN: [ev_revenue, ev_ebitda, ev_ebit, pe]
+    AXP: [pe]
+
+# Conservative, deterministic rating policy. An LLM never sets the rating.
+# BUY requires at least 15% base-case return and limits modeled bear downside;
+# weak evidence or model controls produce WATCH/NO-RATING instead.
+recommendation_policy:
+  horizon: 12-24 months
+  buy_min_expected_return: 0.15
+  sell_max_expected_return: -0.10
+  hold_min_expected_return: -0.10
+  max_bear_downside_for_buy: -0.25
+  min_evidence_coverage: 0.75
+  watch_evidence_coverage: 0.50
+  min_high_quality_share: 0.50
+  min_thesis_confidence: 0.50
+
+reporting:
+  enabled: true
+  required: false
+
+# Explicit thresholds only. A missing observation remains UNKNOWN.
+thesis_monitoring:
+  conditions:
+    - condition_id: visa_payments_volume_growth_floor
+      title: Payments volume growth remains above the bear-case floor
+      metric: payments_volume_growth
+      operator: gte
+      threshold: 0.065
+      watch_band: 0.10
+      unit: ratio
+    - condition_id: visa_processed_transactions_growth_floor
+      title: Processed transactions growth remains above the bear-case floor
+      metric: processed_transactions_growth
+      operator: gte
+      threshold: 0.075
+      watch_band: 0.10
+      unit: ratio
 
 historical_years: 5
 forecast_years: 5
@@ -25,6 +101,11 @@ assumptions:
   scenarios:
 
     bear:
+      operating_drivers:
+        payments_volume_growth: [0.065, 0.060, 0.055, 0.050, 0.050]
+        cross_border_volume_growth: [0.060, 0.060, 0.055, 0.050, 0.050]
+        processed_transactions_growth: [0.075, 0.070, 0.065, 0.060, 0.055]
+        monetization_overlay: [0.010, 0.010, 0.010, 0.010, 0.007]
       revenue_growth:
         - 0.080
         - 0.075
@@ -46,8 +127,18 @@ assumptions:
 
       delta_nwc_pct_incremental_revenue: 0.020
 
+      # Company/industry capital-allocation case; consumed by the generic engine.
+      three_statement:
+        dividends_pct_net_income: 0.25
+        buybacks_pct_net_income: 0.45
+
 
     base:
+      operating_drivers:
+        payments_volume_growth: [0.080, 0.075, 0.070, 0.070, 0.065]
+        cross_border_volume_growth: [0.100, 0.095, 0.090, 0.085, 0.080]
+        processed_transactions_growth: [0.100, 0.095, 0.090, 0.085, 0.080]
+        monetization_overlay: [0.020, 0.020, 0.018, 0.015, 0.014]
       revenue_growth:
         - 0.105
         - 0.100
@@ -69,8 +160,17 @@ assumptions:
 
       delta_nwc_pct_incremental_revenue: 0.010
 
+      three_statement:
+        dividends_pct_net_income: 0.22
+        buybacks_pct_net_income: 0.70
+
 
     bull:
+      operating_drivers:
+        payments_volume_growth: [0.095, 0.090, 0.085, 0.080, 0.075]
+        cross_border_volume_growth: [0.130, 0.120, 0.110, 0.105, 0.100]
+        processed_transactions_growth: [0.120, 0.115, 0.105, 0.100, 0.095]
+        monetization_overlay: [0.025, 0.023, 0.020, 0.018, 0.017]
       revenue_growth:
         - 0.125
         - 0.115
@@ -91,6 +191,16 @@ assumptions:
       capex_pct_revenue: 0.033
 
       delta_nwc_pct_incremental_revenue: 0.005
+
+      three_statement:
+        dividends_pct_net_income: 0.20
+        buybacks_pct_net_income: 0.80
+
+  # Generic linked-statement defaults. Scenario blocks may override these.
+  three_statement:
+    interest_rate: 0.035
+    debt_issuance: 0.0
+    debt_repayment: 0.0
 
 
   wacc:

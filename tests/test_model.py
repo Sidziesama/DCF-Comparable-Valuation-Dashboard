@@ -9,7 +9,12 @@ from src.valuation import (
     solve_reverse_dcf,
 )
 from src.excel_export import export_valuation_workbook, validate_exported_workbook
-from src.three_statement_model import build_three_statement_forecast
+from src.three_statement_model import (
+    BALANCE_SHEET_COLUMNS,
+    CASH_FLOW_STATEMENT_COLUMNS,
+    INCOME_STATEMENT_COLUMNS,
+    build_three_statement_forecast,
+)
 from src.model_quality import build_historical_forecast_analytics, build_model_checks
 
 
@@ -152,6 +157,27 @@ def test_three_statement_debt_and_equity_roll_forwards(forecast):
     )
     assert statements["balance_sheet"].loc[2028, "long_term_debt"] == pytest.approx(13.0)
     assert statements["checks"]["status"].eq("OK").all()
+
+
+def test_three_statement_exposes_canonical_schemas_and_supporting_schedules(forecast):
+    historical = pd.DataFrame({"revenue": [100.0], "operating_income": [30.0],
+        "net_income": [22.0], "cfo": [25.0], "capex": [2.0]}, index=["LTM"])
+    balance = pd.DataFrame({"metric": ["cash", "accounts_receivable", "current_assets",
+        "ppe", "total_assets", "accounts_payable", "current_liabilities",
+        "short_term_debt", "long_term_debt", "total_liabilities", "equity"],
+        "value": [20, 10, 40, 15, 100, 5, 20, 2, 18, 55, 45]})
+    model = build_three_statement_forecast(historical, balance, forecast,
+        {"opening_shares": 10.0, "buyback_price": 5.0})
+    assert set(INCOME_STATEMENT_COLUMNS).issubset(model["income_statement"].columns)
+    assert set(BALANCE_SHEET_COLUMNS).issubset(model["balance_sheet"].columns)
+    assert set(CASH_FLOW_STATEMENT_COLUMNS).issubset(model["cash_flow_statement"].columns)
+    for name in ("working_capital_schedule", "ppe_schedule", "debt_schedule",
+                 "equity_schedule", "capital_returns_schedule"):
+        assert not model[name].empty
+    assert model["ppe_schedule"]["ending_ppe"].equals(model["balance_sheet"]["ppe"])
+    assert model["debt_schedule"]["interest_expense"].equals(
+        model["income_statement"]["interest_expense"])
+    assert model["historical_income_statement"].loc["LTM", "ebit"] == 30.0
 
 
 def test_three_statement_rejects_incomplete_operating_forecast():

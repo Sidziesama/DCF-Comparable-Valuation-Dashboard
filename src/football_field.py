@@ -9,8 +9,9 @@ import numpy as np
 def build_football_field(
     gordon_dcf,
     exit_dcf,
-    mastercard_comps,
+    direct_peer_comps,
     current_price,
+    direct_peer_label="Direct Peer",
 ):
     """
     Convert valuation methodologies into
@@ -105,13 +106,13 @@ def build_football_field(
 
 
     # =====================================================
-    # MASTERCARD TRADING COMPS
+    # DIRECT-PEER TRADING COMPS
     # =====================================================
 
-    if not mastercard_comps.empty:
+    if not direct_peer_comps.empty:
 
         prices = (
-            mastercard_comps[
+            direct_peer_comps[
                 "implied_share_price"
             ]
             .replace(
@@ -129,7 +130,7 @@ def build_football_field(
             rows.append(
                 {
                     "method":
-                        "Mastercard Trading Comps",
+                        f"{direct_peer_label} Trading Comps",
 
                     "low":
                         float(
@@ -199,19 +200,29 @@ def build_football_field(
 
 def calculate_central_range(
     football_field,
+    included_methods=None,
 ):
     """
-    Calculate a simple central valuation range.
+    Calculate the central range from selected primary methods.
 
-    Uses the base valuation from each methodology.
+    Exit-multiple DCF remains visible in the football field, but is excluded
+    by default because it is a terminal-value sensitivity rather than an
+    equally weighted estimate of intrinsic value.
     """
 
     if football_field.empty:
 
         return {}
 
+    if included_methods is None:
+        included_methods = [
+            method for method in football_field["method"].dropna().unique()
+            if method != "DCF - Exit Multiple"
+        ]
+
+    selected = football_field[football_field["method"].isin(included_methods)]
     bases = (
-        football_field[
+        selected[
             "base"
         ]
         .dropna()
@@ -242,4 +253,7 @@ def calculate_central_range(
             float(
                 bases.mean()
             ),
+
+        "method_count":
+            int(len(bases)),
     }
